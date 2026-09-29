@@ -1,0 +1,16 @@
+.git
+.agents
+.codex
+.aws
+.env
+.vs
+.idea
+dist
+artifacts
+**/bin
+**/obj
+**/build
+**/packages
+**/*.user
+**/*.suo
+ReClass.NET/Resources/BuildDate.txt

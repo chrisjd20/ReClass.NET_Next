@@ -1,0 +1,30 @@
+services:
+  build:
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: export
+      args:
+        SOURCE_REVISION: ${SOURCE_REVISION:-working-tree}
+    environment:
+      HOST_UID: ${HOST_UID:-1000}
+      HOST_GID: ${HOST_GID:-1000}
+    volumes:
+      - ./dist:/dist
+  test:
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: test
+  compat:
+    platform: linux/amd64
+    profiles: [compat]
+    build:
+      context: .
+      dockerfile: docker/compat.Dockerfile
+      args:
+        RUNTIME_IMAGE: ${RUNTIME_IMAGE:-ubuntu:22.04@sha256:b8b6ee6aa931ecd9d0d952abc34dc0e5f7c6a30c6bb71b079fe399fde0329c02}
+    volumes:
+      - ./dist:/dist:ro
