@@ -61,11 +61,56 @@ namespace ReClassNET.Debugger
             var result=await Manager.RestoreAllAsync().ConfigureAwait(false);
             if(!result.Success)throw new InvalidOperationException(result.Message);
         }
-        public void SetProject(ReClassNetProject project)
+        // Restores every owned change. On failure the resolver chooses to force, abandon or cancel (throws).
+        public void ReleaseOwnedCode(Func<string,PatchConflictChoice> resolve)
+        {
+            var result=Manager.RestoreAllAsync().GetAwaiter().GetResult();
+            while(!result.Success)
+            {
+                var choice=resolve?.Invoke(result.Message)??PatchConflictChoice.Cancel;
+                if(choice==PatchConflictChoice.Cancel)throw new OperationCanceledException(result.Message);
+                if(choice==PatchConflictChoice.ForceRestore){result=Manager.ForceRestoreAllAsync().GetAwaiter().GetResult();continue;}
+                result=Manager.AbandonAllAsync().GetAwaiter().GetResult();
+                if(Session.State==DebugSessionState.Faulted)Session.RecoveryCompleted();
+            }
+        }
+        public void SetProject(ReClassNetProject project,Func<string,PatchConflictChoice> resolve=null)
         {
             if(ReferenceEquals(Project,project))return;
-            RestoreAsync().GetAwaiter().GetResult();Repository.Save();Repository.Changed-=RepositoryChanged;Project=project;
+            ReleaseOwnedCode(resolve);Repository.Save();Repository.Changed-=RepositoryChanged;Project=project;
             Repository=new PatchRepository(project,project.MarkDirty);TrackRepository();
+        }
+        public int ActivePatchCount=>Manager.ActivePatches.Count;
+        public static bool TryParseCodeAddress(string text,IEnumerable<Module> modules,out ulong address,out string error)
+        {
+            address=0;error=null;text=(text??"").Trim();
+            if(text.Length==0){error="Enter a code address.";return false;}
+            int plus=text.LastIndexOf('+');
+            if(plus<0)
+            {
+                if(ParseHex(text,out address))return true;
+                var only=FindModule(text,modules);
+                if(only!=null){address=unchecked((ulong)only.Start.ToInt64());return true;}
+                error="Enter a hexadecimal address such as 7FF6A1B21234, or module+offset such as game.exe+0x1234.";return false;
+            }
+            string name=text.Substring(0,plus).Trim(),offsetText=text.Substring(plus+1).Trim();ulong offset;
+            if(!ParseHex(offsetText,out offset)){error="The offset after '+' must be hexadecimal (for example game.exe+0x1234).";return false;}
+            ulong baseAddress;var module=FindModule(name,modules);
+            if(module!=null)baseAddress=unchecked((ulong)module.Start.ToInt64());
+            else if(!ParseHex(name,out baseAddress)){error="Module '"+name+"' is not loaded in the target. Check the name (with or without its extension).";return false;}
+            address=unchecked(baseAddress+offset);return true;
+        }
+        private static bool ParseHex(string text,out ulong value)
+        {
+            if(text.StartsWith("0x",StringComparison.OrdinalIgnoreCase))text=text.Substring(2);
+            return ulong.TryParse(text,System.Globalization.NumberStyles.HexNumber,System.Globalization.CultureInfo.InvariantCulture,out value);
+        }
+        private static Module FindModule(string name,IEnumerable<Module> modules)
+        {
+            if(modules==null||name.Length==0)return null;
+            var all=modules.ToArray();
+            return all.FirstOrDefault(m=>string.Equals(m.Name,name,StringComparison.OrdinalIgnoreCase))
+                ??all.FirstOrDefault(m=>string.Equals(System.IO.Path.GetFileNameWithoutExtension(m.Name??""),name,StringComparison.OrdinalIgnoreCase));
         }
         public void Dispose(){Repository.Save();Session.Dispose();Repository.Changed-=RepositoryChanged;}
     }

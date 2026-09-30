@@ -266,7 +266,7 @@ namespace ReClassNET.Debugger
         public string FindBreakpointOverlap(ulong address,int length)=>Invoke(()=>{
             ulong end=checked(address+(ulong)length);
             var match=watches.Values.FirstOrDefault(w=>w.Execution&&w.Software&&w.Address<end&&checked(w.Address+(ulong)w.Length)>address);
-            return match==null?null:"Instruction watch "+match.Id;
+            return match==null?null:"an active instruction watch at 0x"+match.Address.ToString("X")+" (Confirm next execution or Find accessed addresses). Press Stop in that Find writes/accesses window, or close it, then apply again.";
         });
         public IReadOnlyList<ulong> KnownExecutionEntries()=>Invoke(()=>(IReadOnlyList<ulong>)knownEntries.Concat(watches.Values.Where(w=>w.Execution).Select(w=>w.Address)).Distinct().ToArray());
         public void RecordInstructions(IEnumerable<InstructionRecord> decoded)=>Invoke(()=>{
@@ -279,12 +279,12 @@ namespace ReClassNET.Debugger
         });
         public Task<DebugWatch> StartWatchAsync(ulong address,int length,bool writeOnly,Action<WatchHit> sink,string condition="",bool pause=false)=>InvokeAsync(()=>{
             if(stopDepth>0)throw new InvalidOperationException("A code transaction owns the process stop; retry after it finishes.");
-            if(length<=0||length>32)throw new ArgumentOutOfRangeException(nameof(length));
+            if(length<=0||length>32)throw new ArgumentOutOfRangeException(nameof(length),length,"A hardware watch covers 1 to 32 bytes. Select a single field (for example the first 8 bytes) instead.");
             checked{var end=address+(ulong)length;}
             var segments=new List<Tuple<ulong,int>>();ulong cursor=address;int remaining=length;
             while(remaining>0){int n=new[]{8,4,2,1}.First(x=>x<=remaining&&cursor%(ulong)x==0);segments.Add(Tuple.Create(cursor,n));cursor=checked(cursor+(ulong)n);remaining-=n;}
             var free=Enumerable.Range(0,4).Where(i=>slots[i]==null).ToArray();
-            if(segments.Count>free.Length)throw new InvalidOperationException("Entire watched range requires more available hardware slots.");
+            if(segments.Count>free.Length)throw new InvalidOperationException("This range needs "+segments.Count+" debug registers but only "+free.Length+" are free. Stop another watch, or watch a smaller or 8-byte aligned field.");
             var watch=new DebugWatch{Address=address,Length=length,Sink=sink,ConditionText=condition,Condition=WatchCondition.Parse(condition),PauseWhenMatched=pause};
             bool resume=State==DebugSessionState.Running;PauseInternal();
             try
@@ -567,9 +567,20 @@ namespace ReClassNET.Debugger
     {
         public uint NativeError {get;}
         public bool RecoveryRequired {get;}
-        public NativeDebugException(AdvancedOperation operation,uint error,ulong result):base(operation+" failed: "+(ReClassNET.Native.NativeMethods.IsUnix()?"Linux errno "+error:new Win32Exception((int)error).Message+" (native "+error+")"))
+        public NativeDebugException(AdvancedOperation operation,uint error,ulong result):base(operation+" failed: "+(ReClassNET.Native.NativeMethods.IsUnix()?LinuxError(operation,error):new Win32Exception((int)error).Message+" (native "+error+")"))
         {
             NativeError=error;RecoveryRequired=result==1&&(operation==AdvancedOperation.WriteCode||operation==AdvancedOperation.Allocate||operation==AdvancedOperation.Protect||operation==AdvancedOperation.Free||operation==AdvancedOperation.Recover||operation==AdvancedOperation.Hardware||operation==AdvancedOperation.Step);
+        }
+        private static readonly Dictionary<uint,string> Errno=new Dictionary<uint,string>{
+            {1,"EPERM, operation not permitted"},{2,"ENOENT, no such file or directory"},{3,"ESRCH, no such process or thread"},{4,"EINTR, interrupted system call"},{5,"EIO, input/output error"},
+            {10,"ECHILD, no child process"},{11,"EAGAIN, resource temporarily unavailable"},{12,"ENOMEM, out of memory"},{13,"EACCES, permission denied"},{14,"EFAULT, bad address"},
+            {16,"EBUSY, device or resource busy"},{22,"EINVAL, invalid argument"},{28,"ENOSPC, no space left"},{38,"ENOSYS, function not implemented"},{95,"EOPNOTSUPP, operation not supported"},{110,"ETIMEDOUT, timed out"}};
+        internal static string LinuxError(AdvancedOperation operation,uint error)
+        {
+            string name;var text="Linux errno "+error+(Errno.TryGetValue(error,out name)?" ("+name+")":"");
+            if((error!=1&&error!=13)||operation!=AdvancedOperation.Attach)return text+".";
+            string scope=null;try{scope=System.IO.File.ReadAllText("/proc/sys/kernel/yama/ptrace_scope").Trim();}catch{}
+            return text+". Linux refused ptrace access"+(scope==null?"":" (kernel.yama.ptrace_scope = "+scope+")")+". With scope 1 or 2, run ReClass.NET with CAP_SYS_PTRACE (or as root), or have an administrator run: sudo sysctl kernel.yama.ptrace_scope=0. Scope 3 disables attaching until reboot. ReClass.NET never changes this setting.";
         }
     }
 }

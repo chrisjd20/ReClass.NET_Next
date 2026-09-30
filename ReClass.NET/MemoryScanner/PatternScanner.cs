@@ -76,8 +76,9 @@ namespace ReClassNET.MemoryScanner
 			Contract.Requires(pattern != null);
 			Contract.Requires(data != null);
 
+			// A match may end exactly at the last byte of data.
 			var limit = data.Length - pattern.Length;
-			for (var i = 0; i < limit; ++i)
+			for (var i = 0; i <= limit; ++i)
 			{
 				if (pattern.Equals(data, i))
 				{
@@ -97,9 +98,19 @@ namespace ReClassNET.MemoryScanner
 		/// <returns>A <see cref="BytePattern"/> describing the address range.</returns>
 		public static BytePattern CreatePatternFromCode(RemoteProcess process, IntPtr start, int size)
 		{
-			var data = new List<Tuple<byte, bool>>();
+			return CreatePatternFromCode(process, process.ReadRemoteMemory(start, size));
+		}
 
-			var buffer = process.ReadRemoteMemory(start, size);
+		/// <summary>
+		/// Creates a <see cref="BytePattern"/> for already captured code bytes; displacements and immediates become wildcards.
+		/// </summary>
+		/// <param name="process">The process whose provider disassembles the code.</param>
+		/// <param name="buffer">The code bytes.</param>
+		/// <returns>A <see cref="BytePattern"/> describing the code.</returns>
+		public static BytePattern CreatePatternFromCode(RemoteProcess process, byte[] buffer)
+		{
+			var data = new List<Tuple<byte, bool>>();
+			var size = buffer.Length;
 
 			var handle = GCHandle.Alloc(buffer, GCHandleType.Pinned);
 			try

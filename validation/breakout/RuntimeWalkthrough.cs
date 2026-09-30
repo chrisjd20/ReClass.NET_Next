@@ -216,6 +216,13 @@ internal static class RuntimeWalkthrough
         w.Project.AddClass(actor); Check(actor.MemorySize == 72 && (ulong)enumNode.Offset == Clearance, "Named native structure layout differs.");
         using (var file = File.Create(evidence + ".rcnet")) new ReClassNetFile(w.Project).Save(file, new NullLogger());
         using (var reopened = new ReClassNetProject()) { using (var file = File.OpenRead(evidence + ".rcnet")) new ReClassNetFile(reopened).Load(file, new NullLogger()); Check(reopened.Classes.Single().Name == "BreakoutActor" && reopened.Classes.Single().MemorySize == 72 && reopened.Enums.Any(e => e.Name == "Clearance"), "Named project/enum reopen differs."); }
+        // The accepted callsign is only an immediate operand; an access watch on the
+        // callsign leads to the scanner's read, directly before that compare.
+        var reads = new ConcurrentBag<WatchHit>(); var access = await w.Session.StartWatchAsync(c.Player + Callsign, 8, false, reads.Add);
+        try { await c.Action("o"); await Until(() => reads.Any(h => h.Candidates.Any(i => i.Address == c.BadgeSite - 4)), "Badge scanner read"); }
+        finally { await w.Session.StopWatchAsync(access.Id); }
+        var compare = w.Instructions.Decode(w.Target.ReadExact(c.BadgeSite, 10), c.BadgeSite); Check(compare.Success && compare.Instructions.Count == 1 && compare.Instructions[0].Text.ToUpperInvariant().Contains("5245454E49474E45"), "Badge compare immediate differs.");
+        Check(c.Last["primary"] == "0", "Unedited badge opened the gate.");
         byte[] text = new byte[24]; Encoding.ASCII.GetBytes("ENGINEER").CopyTo(text, 0); await Write(w, c.Player + Callsign, text); await WriteInt(w, c.Player + Clearance, 2);
         await c.Action("o"); await c.Action("m"); await Complete(c, 5);
         Console.WriteLine("MANUAL room=5 acknowledgement follows actual service archive save/reopen; GUI project buttons remain checklist items.");
@@ -276,15 +283,18 @@ internal static class RuntimeWalkthrough
         await c.Room(9); var hits = new ConcurrentBag<WatchHit>(); var watch = await w.Session.StartInstructionWatchAsync(c.Damage, hits.Add);
         try { await c.Action("h"); await c.Action("j"); await Until(() => hits.Count >= 2, "Shared writer operands"); var addresses = hits.SelectMany(h => w.Instructions.ResolveMemoryAddresses(h.Candidates.Single(), h.Snapshot.Registers)).Where(m => m.Available).Select(m => m.Address).Distinct().ToArray(); Check(addresses.Contains(c.Player) && addresses.Contains(c.Enemy), "Shared code did not discover both actual actor addresses."); }
         finally { await w.Session.StopWatchAsync(watch.Id); }
+        uint code = 0;
         var pause = new TaskCompletionSource<WatchHit>(TaskCreationOptions.RunContinuationsAsynchronously); watch = await w.Session.StartInstructionWatchAsync(c.Damage, h => pause.TrySetResult(h), "rax == 0x" + c.Player.ToString("X"), true);
         try {
             await c.Action("j"); Check(!pause.Task.IsCompleted, "Player condition matched enemy.");
             var action = c.Action("h"); var hit = await Timed(pause.Task, "Player-only pause on match"); await Until(() => w.Session.State == DebugSessionState.Paused, "Debugger paused");
             Check(hit.Snapshot.Context.Rax == c.Player && Int(w, c.Player + Faction) == 1, "Captured pointer/faction differs.");
+            code = (uint)hit.Snapshot.Context.R9; Check(code >= 1000 && code <= 9999, "Player override code not in r9d.");
             await Task.Delay(1100); await w.Session.StopWatchAsync(watch.Id); watch = null; await w.Session.ResumeAsync(); await Timed(action, "Resume actual game action");
             Check(c.Last["paused"] == "1", "Simulation pause was lost across debugger stop.");
         } finally { if (watch != null) await w.Session.StopWatchAsync(watch.Id); if (w.Session.State == DebugSessionState.Paused) await w.Session.ResumeAsync(); }
-        await c.Action("m"); await Complete(c, 9);
+        await c.Action("o"); Check(c.Last["complete"] == "0", "Unedited clearance unlocked the press.");
+        await WriteInt(w, c.Player + Clearance, (int)code); await c.Action("o"); await Complete(c, 9);
     }
     static async Task Room10(DebugWorkspace w, Child c)
     {
@@ -365,7 +375,7 @@ internal static class RuntimeWalkthrough
         readonly BlockingCollection<string> lines = new BlockingCollection<string>();
         readonly TaskCompletionSource<bool> closed = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         public int Pid { get; private set; }
-        public ulong Root, Player, Enemy, AmmoSite, Damage, VaultEntry, VaultEnd, Signature;
+        public ulong Root, Player, Enemy, AmmoSite, Damage, VaultEntry, VaultEnd, Signature, BadgeSite;
         public Dictionary<string,string> Last = new Dictionary<string,string>();
         public string LastLine = "";
         string window;
@@ -404,7 +414,7 @@ internal static class RuntimeWalkthrough
         public async Task Identity()
         {
             var data = Tokens(await Next(s => s.StartsWith("BREAKOUT "), "startup identity"));
-            Pid = int.Parse(data["pid"], CultureInfo.InvariantCulture); Root = Address(data["root"]); Player = Address(data["player"]); Enemy = Address(data["enemy"]); AmmoSite = Address(data["ammo_site"]); Damage = Address(data["damage_site"]); VaultEntry = Address(data["vault_entry"]); VaultEnd = Address(data["vault_end"]); Signature = Address(data["signature"]);
+            Pid = int.Parse(data["pid"], CultureInfo.InvariantCulture); Root = Address(data["root"]); Player = Address(data["player"]); Enemy = Address(data["enemy"]); AmmoSite = Address(data["ammo_site"]); Damage = Address(data["damage_site"]); VaultEntry = Address(data["vault_entry"]); VaultEnd = Address(data["vault_end"]); Signature = Address(data["signature"]); BadgeSite = Address(data["badge_site"]);
             // A GUI window can map after the startup line; give it one bounded wait.
             if (Windows) await Until(() => { IntPtr found = FindWindowForPid(Pid); if (found != IntPtr.Zero) window = found.ToInt64().ToString(); return found != IntPtr.Zero; }, "Game window");
             else {

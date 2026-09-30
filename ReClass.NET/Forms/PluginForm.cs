@@ -78,7 +78,15 @@ namespace ReClassNET.Forms
 				return;
 			}
 
-			Program.CoreFunctions.SetActiveFunctionsProvider(provider);
+			try
+			{
+				Program.CoreFunctions.SetActiveFunctionsProvider(provider);
+			}
+			catch (Exception ex)
+			{
+				MessageBox.Show(ex.Message, "Provider not changed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+				functionsProvidersComboBox.SelectedItem = Program.CoreFunctions.CurrentFunctionsProvider;
+			}
 		}
 
 		private void getMoreLinkLabel_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)

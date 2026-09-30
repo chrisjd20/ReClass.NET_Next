@@ -11,6 +11,7 @@ using ReClassNET.Core;
 using ReClassNET.Debugger;
 using ReClassNET.Extensions;
 using ReClassNET.Native;
+using ReClassNET.Patching;
 using ReClassNET.Symbols;
 using ReClassNET.Util.Conversion;
 
@@ -41,11 +42,40 @@ namespace ReClassNET.Memory
 		private DebugWorkspace advancedWorkspace;
 		public Guid SessionIdentity { get; private set; }
 		public DebugWorkspace ExistingDebugWorkspace => advancedWorkspace;
-		public DebugWorkspace DebugWorkspace => advancedWorkspace ?? (advancedWorkspace = new DebugWorkspace(this, Program.MainForm.CurrentProject));
-		internal void CloseDebugWorkspace()
+		public bool SupportsAdvancedDebugging => coreFunctions.CurrentFunctions is IAdvancedDebugProvider advanced && (advanced.Capabilities & AdvancedCapabilities.Session) != 0;
+		public DebugWorkspace DebugWorkspace
 		{
-			advancedWorkspace?.Dispose();
+			get
+			{
+				if (advancedWorkspace != null) return advancedWorkspace;
+				if (!SupportsAdvancedDebugging) throw new NotSupportedException($"The selected process provider ({coreFunctions.CurrentFunctionsProvider}) does not support the x64 debugger, instruction editor or patches. \"Find out what writes to this address...\" still uses the classic debugger.");
+				advancedWorkspace = new DebugWorkspace(this, Program.MainForm.CurrentProject);
+				DebugWorkspaceChanged?.Invoke(advancedWorkspace);
+				return advancedWorkspace;
+			}
+		}
+		/// <summary>Raised when the advanced debug workspace is created (argument) or closed (null).</summary>
+		public event Action<DebugWorkspace> DebugWorkspaceChanged;
+		/// <summary>Chooses how to handle patches that cannot be restored while closing. Null cancels.</summary>
+		public Func<string, PatchConflictChoice> PatchConflictResolver { get; set; }
+		internal void CloseDebugWorkspace() => CloseDebugWorkspace(false);
+		internal void CloseDebugWorkspace(bool force)
+		{
+			var workspace = advancedWorkspace;
+			if (workspace == null) return;
+			try
+			{
+				// A dead target owns nothing restorable; never prompt or block for it.
+				if (process == null || !coreFunctions.IsProcessValid(handle)) { force = true; workspace.Manager.InvalidateTarget(); }
+				workspace.ReleaseOwnedCode(PatchConflictResolver);
+				workspace.Dispose();
+			}
+			catch
+			{
+				if (!force) throw;
+			}
 			advancedWorkspace = null;
+			DebugWorkspaceChanged?.Invoke(null);
 		}
 
 		/// <summary>Event which gets invoked when a process was opened.</summary>
@@ -141,6 +171,9 @@ namespace ReClassNET.Memory
 		{
 			if (process != null)
 			{
+				// Owned patches are released first so a cancelled conflict leaves the process open.
+				CloseDebugWorkspace();
+
 				ProcessClosing?.Invoke(this);
 
 				lock (processSync)

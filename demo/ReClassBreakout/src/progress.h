@@ -12,6 +12,9 @@ struct Progress {
     bool hex = false;
     bool hints = false;
     bool solutions = false;
+    bool readout = false;
+    bool drawer = true;
+    bool crt = true;
     std::string path;
     std::string diagnostic;
     void load();

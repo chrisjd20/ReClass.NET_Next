@@ -56,6 +56,15 @@ namespace ReClassNET.Debugger
             if(full!=null && s.Registers.TryGetValue(full,out bits)) return new Value((bits>>shift)&((1UL<<width)-1));
             throw new InvalidOperationException("Register unavailable: "+name);
         }
+        private static Value Divide(ulong a,ulong b,bool signed,bool remainder)
+        {
+            if(b==0)throw new DivideByZeroException("Condition divides by zero.");
+            if(!signed)return new Value(remainder?a%b:a/b);
+            long x=unchecked((long)a),y=unchecked((long)b);
+            // long.MinValue / -1 overflows; two's complement wraps to MinValue with remainder 0.
+            if(y==-1)return new Value(remainder?0UL:unchecked(0UL-a),true);
+            return new Value(unchecked((ulong)(remainder?x%y:x/y)),true);
+        }
         private sealed class Parser
         {
             private readonly string text; private int position,nodes;
@@ -132,7 +141,7 @@ namespace ReClassNET.Debugger
                             case "==":return new Value(a.Bits==b.Bits?1UL:0);case "!=":return new Value(a.Bits!=b.Bits?1UL:0);
                             case "<":return new Value(cmp<0?1UL:0);case ">":return new Value(cmp>0?1UL:0);case "<=":return new Value(cmp<=0?1UL:0);case ">=":return new Value(cmp>=0?1UL:0);
                             case "+":return new Value(unchecked(a.Bits+b.Bits),signed);case "-":return new Value(unchecked(a.Bits-b.Bits),signed);case "*":return new Value(unchecked(a.Bits*b.Bits),signed);
-                            case "/":return new Value(a.Bits/b.Bits,signed);case "%":return new Value(a.Bits%b.Bits,signed);
+                            case "/":case "%":return Divide(a.Bits,b.Bits,signed,op=="%");
                             case "&":return new Value(a.Bits&b.Bits,signed);case "|":return new Value(a.Bits|b.Bits,signed);case "^":return new Value(a.Bits^b.Bits,signed);
                             case "<<":return new Value(a.Bits<<(int)(b.Bits&63),signed);case ">>":return new Value(signed?unchecked((ulong)((long)a.Bits>>(int)(b.Bits&63))):a.Bits>>(int)(b.Bits&63),signed);
                             default:throw new FormatException("Invalid operator.");

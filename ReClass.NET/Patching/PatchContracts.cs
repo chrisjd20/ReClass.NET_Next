@@ -11,6 +11,7 @@ namespace ReClassNET.Patching
     public enum PatchSourceKind { Assembly, Bytes }
     public enum PatchLocatorKind { SessionAddress, ModuleOffset, ModulePattern }
     public enum BoundarySource { Uncertain, Execution, VerifiedChain, ExplicitOrigin }
+    public enum PatchConflictChoice { Cancel, ForceRestore, Abandon }
     public enum PatchStatus { Draft, Previewed, Prepared, Applying, Active, Inactive, Conflict, Unsupported, Failed, RecoveryRequired, TargetExited, Cancelled }
 
     public sealed class PatchDefinition
@@ -163,6 +164,7 @@ namespace ReClassNET.Patching
         public string Message { get; internal set; }
         public bool Recovered { get; internal set; }
         public ActivePatch Patch { get; internal set; }
+        public IReadOnlyList<PatchResult> Failures { get; internal set; } = new PatchResult[0];
         public bool Success => Status == PatchStatus.Active || Status == PatchStatus.Inactive || Status == PatchStatus.TargetExited;
         internal static PatchResult Fail(PatchStatus status, string message) => new PatchResult { Status = status, Message = message };
     }

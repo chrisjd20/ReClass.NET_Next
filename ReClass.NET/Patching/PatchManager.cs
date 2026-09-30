@@ -154,7 +154,30 @@ namespace ReClassNET.Patching
             try { return await RestoreCore(id, cancellation).ConfigureAwait(false); }
             finally { operations.Release(); }
         }
-        private async Task<PatchResult> RestoreCore(Guid id, CancellationToken cancellation)
+        // Writes the saved originals even when another writer changed the installed bytes.
+        public async Task<PatchResult> ForceRestoreAsync(Guid id, CancellationToken cancellation = default(CancellationToken))
+        {
+            await operations.WaitAsync(cancellation).ConfigureAwait(false);
+            try { return await RestoreCore(id, cancellation, true).ConfigureAwait(false); }
+            finally { operations.Release(); }
+        }
+        // Forgets ownership without writing; published hook memory stays retained in the target.
+        public async Task<PatchResult> AbandonAsync(Guid id, CancellationToken cancellation = default(CancellationToken))
+        {
+            await operations.WaitAsync(cancellation).ConfigureAwait(false);
+            try { return AbandonCore(id); }
+            finally { operations.Release(); }
+        }
+        private PatchResult AbandonCore(Guid id)
+        {
+            ActivePatch record;
+            lock (stateLock) { if (!active.TryGetValue(id, out record)) return new PatchResult { Status = PatchStatus.Inactive, Message = "Patch is inactive." }; active.Remove(id); }
+            record.Status = PatchStatus.Inactive; record.Message = "Ownership abandoned; the current bytes were left unchanged.";
+            if (record.Allocation != null) record.Allocation.Retired = true;
+            RaiseChanged();
+            return new PatchResult { Status = PatchStatus.Inactive, Patch = record, Message = record.Message };
+        }
+        private async Task<PatchResult> RestoreCore(Guid id, CancellationToken cancellation, bool force = false)
         {
             if (!target.IsAlive) return ClearExited();
             ActivePatch record;
@@ -168,10 +191,10 @@ namespace ReClassNET.Patching
                     PatchPlanner.ValidateIdentity(record.Preview, target);
                     cancellation.ThrowIfCancellationRequested();
                     var current = PatchPlanner.Exact(target, record.Preview.Address, record.InstalledBytes.Length);
-                    if (record.Status != PatchStatus.RecoveryRequired && !PatchBytes.Equal(current, record.InstalledBytes))
+                    if (!force && record.Status != PatchStatus.RecoveryRequired && !PatchBytes.Equal(current, record.InstalledBytes))
                     {
                         record.Status = PatchStatus.Conflict;
-                        record.Message = "Installed bytes were changed by another writer; originals are retained.";
+                        record.Message = "Installed bytes of " + record.Preview.Definition.Name + " were changed by another writer; originals are retained. Choose Force restore original bytes or Abandon ownership.";
                         RaiseChanged();
                         return new PatchResult { Status = PatchStatus.Conflict, Message = record.Message, Patch = record };
                     }
@@ -247,17 +270,41 @@ namespace ReClassNET.Patching
             }
             catch (Exception e) { return PatchResult.Fail(PatchStatus.Failed, "Cannot release preparation: " + e.Message); }
         }
-        public async Task<PatchResult> RestoreAllAsync(CancellationToken cancellation = default(CancellationToken))
+        public Task<PatchResult> RestoreAllAsync(CancellationToken cancellation = default(CancellationToken)) => RestoreAllCore(cancellation, false);
+        public Task<PatchResult> ForceRestoreAllAsync(CancellationToken cancellation = default(CancellationToken)) => RestoreAllCore(cancellation, true);
+        // Continues past failures so one conflict cannot hide or block the remaining patches.
+        private async Task<PatchResult> RestoreAllCore(CancellationToken cancellation, bool force)
         {
             await operations.WaitAsync(cancellation).ConfigureAwait(false);
             try
             {
-                foreach (var id in ActivePatches.Select(p => p.Id))
+                var failures = new List<PatchResult>(); var names = new List<string>();
+                foreach (var patch in ActivePatches)
                 {
-                    var result = await RestoreCore(id, cancellation).ConfigureAwait(false);
-                    if (!result.Success) return result;
+                    var result = await RestoreCore(patch.Id, cancellation, force).ConfigureAwait(false);
+                    if (!result.Success) { failures.Add(result); names.Add((patch.Preview.Definition.Name ?? "Patch") + ": " + result.Message); }
                 }
-                return await CancelCore(cancellation).ConfigureAwait(false);
+                var cancel = await CancelCore(cancellation).ConfigureAwait(false);
+                if (!cancel.Success) { failures.Add(cancel); names.Add("Prepared hook: " + cancel.Message); }
+                if (failures.Count == 0) return new PatchResult { Status = PatchStatus.Inactive, Message = "All owned patches restored." };
+                var worst = failures.FirstOrDefault(f => f.Status == PatchStatus.RecoveryRequired) ?? failures.FirstOrDefault(f => f.Status == PatchStatus.Conflict) ?? failures[0];
+                return new PatchResult { Status = worst.Status, Patch = worst.Patch, Failures = failures, Message = failures.Count + " owned change(s) could not be restored. " + string.Join(" ", names) };
+            }
+            finally { operations.Release(); }
+        }
+        public async Task<PatchResult> AbandonAllAsync(CancellationToken cancellation = default(CancellationToken))
+        {
+            await operations.WaitAsync(cancellation).ConfigureAwait(false);
+            try
+            {
+                int count = 0; foreach (var patch in ActivePatches) if (AbandonCore(patch.Id).Patch != null) count++;
+                var pending = preparation; string message = "";
+                if (pending != null)
+                {
+                    var cancel = await CancelCore(cancellation).ConfigureAwait(false);
+                    if (!cancel.Success) { lock (stateLock) preparation = null; message = " The unpublished hook reservation was left in the target."; RaiseChanged(); }
+                }
+                return new PatchResult { Status = PatchStatus.Inactive, Message = "Ownership of " + count + " patch(es) abandoned; current bytes were left unchanged." + message };
             }
             finally { operations.Release(); }
         }

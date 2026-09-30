@@ -61,10 +61,15 @@ namespace ReClassNET.Forms
 
 		private void UpdateWindowTitle(string extra = null)
 		{
+			titleExtra = extra;
 			var title = $"{(Program.Settings.RandomizeWindowTitle ? Utils.RandomString(Program.GlobalRandom.Next(15, 20)) : Constants.ApplicationName)} ({Constants.Platform})";
 			if (!string.IsNullOrEmpty(extra))
 			{
 				title += $" - {extra}";
+			}
+			if (currentProject != null && currentProject.IsDirty)
+			{
+				title += " *";
 			}
 			Text = title;
 		}
@@ -149,8 +154,26 @@ namespace ReClassNET.Forms
 
 		private async void MainForm_FormClosing(object sender, FormClosingEventArgs e)
 		{
-			try { Program.RemoteProcess.CloseDebugWorkspace(); }
-			catch (Exception error) { e.Cancel = true; MessageBox.Show(error.Message, "Close cancelled: restore owned code first"); return; }
+			if (!exitConfirmed)
+			{
+				if (!ConfirmReplaceProject("exit"))
+				{
+					e.Cancel = true;
+					return;
+				}
+				try { Program.RemoteProcess.CloseDebugWorkspace(); }
+				catch (OperationCanceledException) { e.Cancel = true; return; }
+				catch (Exception error)
+				{
+					if (MessageBox.Show(error.Message + Environment.NewLine + Environment.NewLine + "Exit anyway and leave the target as it is?", "Owned code could not be restored", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+					{
+						e.Cancel = true;
+						return;
+					}
+					Program.RemoteProcess.CloseDebugWorkspace(true);
+				}
+				exitConfirmed = true;
+			}
 			// Stop the update timer
 			processUpdateTimer.Stop();
 
@@ -224,7 +247,7 @@ namespace ReClassNET.Forms
 
 		private void detachToolStripMenuItem_Click(object sender, EventArgs e)
 		{
-			Program.RemoteProcess.Close();
+			TryCloseProcess("Detach cancelled");
 		}
 
 		private void newClassToolStripButton_Click(object sender, EventArgs e)
@@ -236,6 +259,10 @@ namespace ReClassNET.Forms
 		{
 			try
 			{
+				if (!ConfirmReplaceProject("open another project"))
+				{
+					return;
+				}
 				var path = ShowOpenProjectFileDialog();
 				if (path != null)
 				{
@@ -280,6 +307,10 @@ namespace ReClassNET.Forms
 
 		private void clearProjectToolStripMenuItem_Click(object sender, EventArgs e)
 		{
+			if (!ConfirmReplaceProject("clear the project"))
+			{
+				return;
+			}
 			SetProject(new ReClassNetProject());
 		}
 
@@ -778,7 +809,10 @@ namespace ReClassNET.Forms
 				{
 					var path = files.First();
 
-					LoadProjectFromPath(path);
+					if (ConfirmReplaceProject("open another project"))
+					{
+						LoadProjectFromPath(path);
+					}
 				}
 				catch (Exception ex)
 				{

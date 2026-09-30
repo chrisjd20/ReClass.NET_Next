@@ -31,7 +31,7 @@ namespace ReClassNET.Patching
                 cancellation.ThrowIfCancellationRequested();
                 if (!target.IsAlive) return Reject(preview, PatchStatus.TargetExited, "The target exited.");
                 if (!target.SupportsCodeTransactions) return Reject(preview, PatchStatus.Unsupported, "The selected provider cannot perform coordinated code transactions.");
-                if (definition.Boundary == BoundarySource.Uncertain) return Reject(preview, PatchStatus.Unsupported, "An established instruction boundary is required.");
+                if (definition.Boundary == BoundarySource.Uncertain) return Reject(preview, PatchStatus.Unsupported, "An established instruction boundary is required. This address came from a data watch guess: select the row and choose Confirm next execution in the Find writes/accesses window, or type the exact code address in the editor and choose Load selection.");
                 if (definition.SelectionLength <= 0 || definition.SelectionLength > MaximumBodySize) return Reject(preview, PatchStatus.Unsupported, "Select 1 to 65536 bytes of complete instructions.");
                 var resolved = resolver.Resolve(preview.Definition, target, cancellation);
                 if (resolved.Status != PatchResolutionStatus.Resolved) return Reject(preview, PatchStatus.Conflict, resolved.Status + ": " + resolved.Message);

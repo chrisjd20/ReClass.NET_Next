@@ -13,12 +13,24 @@ global breakout_damage_patchsite
 global breakout_evaluate_vault
 global breakout_vault_entry
 global breakout_vault_endpoint
+global breakout_scan_badge
+global breakout_badge_compare
 
 %macro ACTOR_TO_RAX 0
 %ifidn __OUTPUT_FORMAT__, win64
     mov rax, rcx
 %else
     mov rax, rdi
+%endif
+%endmacro
+
+; The second argument (a 32-bit code) is copied to r9d so a debugger sees it
+; in the same register on both platforms.
+%macro CODE_TO_R9 0
+%ifidn __OUTPUT_FORMAT__, win64
+    mov r9d, edx
+%else
+    mov r9d, esi
 %endif
 %endmacro
 
@@ -40,6 +52,7 @@ breakout_ammo_patchsite:
 align 16
 breakout_apply_damage:
     ACTOR_TO_RAX
+    CODE_TO_R9
 breakout_damage_patchsite:
     sub dword [rax + ACTOR_HEALTH], byte 10
     times 24 nop
@@ -61,6 +74,25 @@ breakout_vault_entry:
     xor eax, eax
 breakout_vault_endpoint:
     nop
+    ret
+
+; Room 5 gate. The accepted callsign exists only as this immediate operand.
+align 16
+breakout_scan_badge:
+    ACTOR_TO_RAX
+    mov rdx, [rax + ACTOR_CALLSIGN]
+breakout_badge_compare:
+    mov rcx, 'ENGINEER'
+    cmp rdx, rcx
+    jne .reject
+    cmp byte [rax + ACTOR_CALLSIGN + 8], 0
+    jne .reject
+    cmp dword [rax + ACTOR_CLEARANCE], ENGINEER_CLEARANCE
+    jne .reject
+    mov eax, 1
+    ret
+.reject:
+    xor eax, eax
     ret
 
 %ifidn __OUTPUT_FORMAT__, elf64

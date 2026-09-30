@@ -22,7 +22,7 @@ struct FieldSnapshot {
     bool valid = true;
 };
 struct SceneObject {
-    enum class Kind { Target, Enemy, Door, Reactor, Exit };
+    enum class Kind { Target, Enemy, Door, Reactor, Exit, Turret };
     Kind kind = Kind::Target;
     float x = 0, y = 0, radius = 18;
     bool active = true;
@@ -36,6 +36,14 @@ struct RenderSnapshot {
     int health = 0, ammo = 0;
     bool playerValid = true, doorOpen = false, trialRunning = false;
     std::vector<SceneObject> objects;
+    // Presentation-only copies; the authoritative values stay in the layout structs.
+    std::uint8_t keycard = 0;
+    std::uint32_t flags = 0, clearance = 0, faction = 0;
+    std::string callsign, weaponName;
+    int weaponDamage = 0, enemyHealth = 0, enemyAmmo = 0;
+    float projectileSpeed = 0;
+    int shots = 0, hits = 0, enemyHits = 0, enemyShots = 0, swaps = 0;
+    bool turret = false, primary = false, complete = false, scanning = false;
 };
 struct OutcomeSnapshot {
     bool complete = false, primaryObserved = false, restorationObserved = false;
@@ -44,7 +52,7 @@ struct OutcomeSnapshot {
 };
 struct TeachingSnapshot {
     std::uintptr_t worldRoot = 0, ammoSite = 0, damageSite = 0, vaultEntry = 0;
-    std::uintptr_t vaultEndpoint = 0, signature = 0;
+    std::uintptr_t vaultEndpoint = 0, signature = 0, badgeSite = 0;
     bool ammoPatched = false, damagePatched = false, vaultPatched = false;
     std::string signaturePattern;
 };
@@ -98,6 +106,8 @@ private:
     void tick(float movementX, float movementY);
     void updateCompletion();
     void initializeWeapon(Weapon& weapon, const char* name, int damage, float speed, float cooldown);
+    bool onScanner(const Actor* actor) const;
+    friend bool selfCheck(std::string& report);
     World world_{};
     std::array<std::unique_ptr<Actor>, 3> actors_;
     std::array<std::unique_ptr<Inventory>, 3> inventories_;
@@ -106,7 +116,9 @@ private:
     int room_ = 1, shots_ = 0, hits_ = 0, enemyHits_ = 0, enemyShots_ = 0, reloads_ = 0;
     int swaps_ = 0, beforeSwap_ = 0, afterSwap_ = 0, unchangedHits_ = 0, increasingShots_ = 0;
     bool paused_ = true, primary_ = false, restored_ = false, complete_ = false;
-    bool manual_ = false, enemyHookVerified_ = false, turret_ = false;
+    bool manual_ = false, enemyHookVerified_ = false, turret_ = false, overrideAccepted_ = false;
+    // Room 9: passed to the shared damage routine in r9d; only player hits carry the real code.
+    std::uint32_t overrideCode_ = 0, decoyCode_ = 0;
     double accumulator_ = 0;
     float automaticTimer_ = 0, aimX_ = 0, aimY_ = 0;
     bool hasAim_ = false;
@@ -123,8 +135,9 @@ bool selfCheck(std::string& report);
 extern "C" {
 extern breakout::World* breakout_world_root;
 void breakout_decrement_ammo(breakout::Actor* actor);
-void breakout_apply_damage(breakout::Actor* actor);
+void breakout_apply_damage(breakout::Actor* actor, std::uint32_t code);
 int breakout_evaluate_vault(breakout::Actor* actor);
+int breakout_scan_badge(breakout::Actor* actor);
 extern unsigned char breakout_ammo_patchsite[], breakout_damage_patchsite[];
-extern unsigned char breakout_vault_entry[], breakout_vault_endpoint[], breakout_ammo_signature[];
+extern unsigned char breakout_vault_entry[], breakout_vault_endpoint[], breakout_ammo_signature[], breakout_badge_compare[];
 }

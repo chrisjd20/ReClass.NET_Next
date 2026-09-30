@@ -13,8 +13,9 @@ namespace ReClassNET.Debugger
 		private volatile bool running = true;
 		private volatile bool isAttached;
 
-		public bool IsAttached => process.ExistingDebugWorkspace != null
-			? process.ExistingDebugWorkspace.Session.State == DebugSessionState.Running || process.ExistingDebugWorkspace.Session.State == DebugSessionState.Paused
+		// Only an advanced-capable provider owns a DebugSession; plugins keep the classic thread.
+		public bool IsAttached => process.SupportsAdvancedDebugging
+			? process.ExistingDebugWorkspace != null && (process.ExistingDebugWorkspace.Session.State == DebugSessionState.Running || process.ExistingDebugWorkspace.Session.State == DebugSessionState.Paused)
 			: isAttached;
 
 		public bool StartDebuggerIfNeeded(Func<bool> queryAttach)
@@ -26,8 +27,7 @@ namespace ReClassNET.Debugger
 				return false;
 			}
 
-			var advanced = process.CoreFunctions.CurrentFunctions as ReClassNET.Core.IAdvancedDebugProvider;
-			if (advanced != null && (advanced.Capabilities & ReClassNET.Core.AdvancedCapabilities.Session) != 0)
+			if (process.SupportsAdvancedDebugging)
 			{
 				if (IsAttached) return true;
 				if (!queryAttach()) return false;
@@ -37,7 +37,8 @@ namespace ReClassNET.Debugger
 
 			lock (syncThread)
 			{
-				if (thread != null && IsAttached)
+				// The attach flag is set by the thread itself; a live thread is already attaching or attached.
+				if (thread != null && thread.IsAlive)
 				{
 					return true;
 				}

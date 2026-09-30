@@ -63,7 +63,10 @@ namespace ReClassNET.Forms
 		{
 			Contract.Requires(info != null);
 
-			Program.RemoteProcess.Close();
+			if (!TryCloseProcess("Attach cancelled"))
+			{
+				return;
+			}
 
 			Program.RemoteProcess.Open(info);
 			Program.RemoteProcess.UpdateProcessInformations();
@@ -84,8 +87,21 @@ namespace ReClassNET.Forms
 
 			if (currentProject != null)
 			{
-				Program.RemoteProcess.ExistingDebugWorkspace?.SetProject(newProject);
+				try
+				{
+					Program.RemoteProcess.ExistingDebugWorkspace?.SetProject(newProject, Program.RemoteProcess.PatchConflictResolver);
+				}
+				catch (OperationCanceledException)
+				{
+					return;
+				}
+				catch (Exception ex)
+				{
+					MessageBox.Show(ex.Message, "Project not changed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+					return;
+				}
 				ClassNode.ClassCreated -= currentProject.AddClass;
+				currentProject.DirtyChanged -= ProjectDirtyChanged;
 			}
 
 			void UpdateClassNodes(BaseNode node)
@@ -94,6 +110,8 @@ namespace ReClassNET.Forms
 			}
 
 			currentProject = newProject;
+			currentProject.DirtyChanged += ProjectDirtyChanged;
+			UpdateWindowTitle(titleExtra);
 			currentProject.ClassAdded += c =>
 			{
 				projectView.AddClass(c);

@@ -63,8 +63,17 @@ namespace ReClassNET.Debugger
 
 		public void FindCodeByBreakpoint(IntPtr address, int size, HardwareBreakpointTrigger trigger)
 		{
-			if (process.ExistingDebugWorkspace != null)
+			if (process.SupportsAdvancedDebugging)
 			{
+				if (size > 32)
+				{
+					// Four debug registers cover at most 4 x 8 aligned bytes.
+					if (System.Windows.Forms.MessageBox.Show($"The selected value is {size} bytes, but a hardware watch covers at most 32 bytes (four 8-byte debug registers).\n\nWatch the first 8 bytes at 0x{address.ToInt64():X} instead?\n\nTip: select a single field inside the structure to watch exactly that field.", "Watch too large", System.Windows.Forms.MessageBoxButtons.YesNo, System.Windows.Forms.MessageBoxIcon.Information) != System.Windows.Forms.DialogResult.Yes)
+					{
+						return;
+					}
+					size = 8;
+				}
 				new WatchFinderForm(process.DebugWorkspace, unchecked((ulong)address.ToInt64()), size, trigger == HardwareBreakpointTrigger.Write).Show();
 				return;
 			}

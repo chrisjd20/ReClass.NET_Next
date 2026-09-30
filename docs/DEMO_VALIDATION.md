@@ -197,3 +197,93 @@ Current UI package export: 2026-09-30T14:08:54.580098+00:00. Source-tree digest:
 The normal combined export and integrated artifact verifier passed for both
 archives, including the new font license metadata. Build evidence:
 `dist/breakout-readable-ui-export.log`.
+
+## Ordinary-control bypass audit — 2026-09-30
+
+The previous delivery allowed Room 2 to finish through repeated recharge or
+passive regeneration, and Room 4 through its keycard/power/alarm toggles. These
+were gameplay bypasses, despite the earlier campaign proving the memory-edit
+solutions worked.
+
+Normal charging now stops at 60, below the reactor threshold of 90. Charge edited
+above 60 remains authoritative, including the guide's 95 → 100 recharge check.
+Keycard/power controls now invalidate the card and cut power; they cannot grant
+access. Alarm toggling remains available for scan practice. Room 11 shares the
+keycard invalidation control. Generated in-game and offline lessons were updated.
+Loading progress from version 1 clears only Room 2/4's recorded completion badges.
+
+| Rooms | Audit result / regression coverage |
+|---|---|
+| 1 | Ordinary ammo runs out before twenty targets; reloading invalidates completion. |
+| 2 | Repeated recharge, passive ticks, and combined controls cannot reach 90; external charge edits still activate the reactor. Reset removes completion. |
+| 3 | Default speed cannot reach the exit before the deadline; edited speed succeeds. Start trial resets position and time together. |
+| 4 | Diagnostic controls cannot grant a card or power. External edits open the door; revocation closes it while preserving unrelated flag bits. |
+| 5 | Acknowledging project saving cannot replace the callsign/clearance edits. |
+| 6 | Repeated ordinary shots and weapon swaps cannot penetrate either armored target; each replacement still needs an upgrade. |
+| 7–8 | Ordinary hits/turret and shots cannot produce unchanged health or incrementing ammo. |
+| 9 | Both hits require an additional manual acknowledgement. Debugger observations cannot be verified by the game; completion now explicitly says SELF-REPORTED. No memory write is required by this lesson. |
+| 10 | Repeated normal player/enemy firing cannot produce the healing outcome. |
+| 11 | Diagnostic controls plus trace acknowledgement cannot open the vault without edited inputs. |
+| 12 | Restart acknowledgement and ordinary shots cannot replace the increment/restore behavior. |
+
+Both Windows/Linux x64 packages compiled and passed integrated artifact checks;
+exported archive checksums passed. The actual packaged Linux game's expanded
+`--self-check` passed, covering all twelve room initializers, the above ordinary
+control barriers, edited data outcomes, pointer safety, and fixed ticks. Windows
+runtime, interactive GUI, and full external-provider campaign checks were not
+repeated. Code-patch/restoration observations remain historical evidence, not a
+new acceptance run. Progress migration was reviewed in source, not runtime-tested.
+
+| Game in this audit's packages | SHA-256 |
+|---|---|
+| Windows | `73bf54c54dc2886a44670be4d430b613c97fd869a5b838cde7b4fecd5e39fa60` |
+| Linux | `ed6aeef10aecb10695fd984d079edec984bddcbdf8f849089671d51b9473432f` |
+
+This record was added after export; `build-manifest.json` identifies the actual
+source snapshot used for the packages.
+
+## Presentation and room revamp — 2026-09-30
+
+The game view now owns most of the window: a 2D top-down facility with
+procedurally generated pixel-art sprites, per-room set pieces, particle and
+tracer effects, an in-view HUD and an action hotbar. Tutorial, objective and
+outcome text moved into a collapsible Mission drawer (Tab); the live values
+panel became an optional Memory tab behind **Show debug readout** (off by
+default). Values changed from outside the process are detected between frames
+and flash as **MEMORY WRITE DETECTED**. Everything visual is derived from
+snapshots; no layout offsets, exported symbols, ACTION lines or controlled
+actions changed except as listed below.
+
+Room changes:
+
+- Room 5 (Biometric Gate): the gate decision runs a new `breakout_scan_badge`
+  routine, which the game also calls every tick while ROOKIE stands on the scan
+  pad. The accepted callsign exists only as the immediate of
+  `breakout_badge_compare` (`mov rcx, 'ENGINEER'`); the identity line gained a
+  `badge_site=` token. The objective no longer names the callsign.
+- Room 9 (Shared Machinery): each reset draws a four-digit override code and a
+  distinct decoy. `breakout_apply_damage` receives the code as its second
+  argument and copies it to `r9d` (player hits carry the code, enemy hits the
+  decoy). **Submit override** (Ctrl+O) compares player clearance with the code.
+  The manual acknowledgement and the SELF-REPORTED badge are gone.
+- Closed doors in Rooms 4, 5 and 11 block movement; Room 3 keeps the robot on the
+  bridge (y 160–200). Ctrl+U toggles the Room 7 turret.
+- Progress version 3 clears only Room 5 and 9 badges.
+
+Keyboard input now also reads raylib's per-frame press queue and holds Ctrl for
+one extra frame, so taps shorter than a frame are not lost. Without this the
+harness's `xdotool` taps were dropped under Mesa software rendering.
+
+Linux evidence (Ubuntu 22.04 container, Xvfb + llvmpipe, container-scoped
+ptrace; host policy unchanged): the packaged `--self-check` passed; the
+twelve-room real-provider campaign passed, including the new Room 5 access watch
+leading to the `ENGINEER` immediate and the Room 9 code read from captured `r9`;
+`--resume-only` passed. Logs: `dist/breakout-revamp/{linux,linux-resume,export}.log`.
+The combined Docker export and artifact verifier passed for both packages. The
+Windows executable was run once through WSL interop and rendered correctly, but
+the Windows campaign and the interactive ReClass GUI checklist were not run.
+
+| Game in this revamp's packages | SHA-256 |
+|---|---|
+| Windows | `635796cd7c73b20a7b92634895ebc1fe3a4c5730b8e8d6e53cb843cd06de83fe` |
+| Linux | `75494bbc533e6c0adbf760eaa30f02fb6667958e66af492631022513a0ee62c3` |

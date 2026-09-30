@@ -1047,6 +1047,18 @@
     <Compile Include="Forms\MainForm.Debugger.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <!-- IDE builds: copy the pinned NASM when one is available locally. Docker packages add Tools\ themselves.
+       Sources: Dependencies\Tools\ (copied from a release package) or the debugger-validation export in dist\. -->
+  <ItemGroup>
+    <BundledNasmCandidate Include="$(MSBuildThisFileDirectory)..\Dependencies\Tools\nasm.exe;$(MSBuildThisFileDirectory)..\Dependencies\Tools\nasm;$(MSBuildThisFileDirectory)..\dist\debugger-validation\focused\Tools\nasm.exe;$(MSBuildThisFileDirectory)..\dist\debugger-validation\focused\Tools\nasm" />
+  </ItemGroup>
+  <Target Name="CopyBundledNasm" AfterTargets="Build">
+    <ItemGroup>
+      <BundledNasm Include="@(BundledNasmCandidate)" Condition="Exists('%(FullPath)')" />
+    </ItemGroup>
+    <Copy SourceFiles="@(BundledNasm)" DestinationFolder="$(OutDir)Tools" SkipUnchangedFiles="true" Condition="'@(BundledNasm)' != ''" />
+    <Exec Command="chmod +x &quot;$(OutDir)Tools/nasm&quot;" Condition=" '$(OS)' == 'Unix' And Exists('$(OutDir)Tools/nasm') " />
+  </Target>
   <PropertyGroup>
     <PreBuildEvent Condition=" '$(OS)' == 'Windows_NT' ">powershell -Command "((Get-Date).ToUniversalTime()).ToString(\"yyyy\/MM\/dd HH:mm:ss\") | Out-File '$(ProjectDir)Resources\BuildDate.txt'"</PreBuildEvent>
     <PreBuildEvent Condition=" '$(OS)' == 'Unix' ">date +"%Y/%m/%d %H:%M:%S" &gt; $(ProjectDir)/Resources/BuildDate.txt</PreBuildEvent>

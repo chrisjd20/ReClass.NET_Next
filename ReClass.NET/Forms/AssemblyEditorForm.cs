@@ -65,15 +65,15 @@ namespace ReClassNET.Forms
 			authoritative = this.definition.SourceKind;
 			Text = "Instruction inspector and assembly editor";
 			MinimumSize = new Size(950, 700); Size = new Size(1150, 880); StartPosition = FormStartPosition.CenterParent;
-			modeBox.Items.AddRange(new object[] { PatchMode.InPlace, PatchMode.Hook });
-			semanticBox.Items.AddRange(new object[] { HookSemanticMode.ReplaceSelection, HookSemanticMode.InsertBefore, HookSemanticMode.InsertAfter });
-			locatorBox.Items.AddRange(new object[] { PatchLocatorKind.SessionAddress, PatchLocatorKind.ModuleOffset, PatchLocatorKind.ModulePattern });
+			modeBox.Items.AddRange(new object[] { Choice.Of(PatchMode.InPlace, "In place"), Choice.Of(PatchMode.Hook, "Hook") });
+			semanticBox.Items.AddRange(new object[] { Choice.Of(HookSemanticMode.ReplaceSelection, "Replace selection"), Choice.Of(HookSemanticMode.InsertBefore, "Insert before"), Choice.Of(HookSemanticMode.InsertAfter, "Insert after") });
+			locatorBox.Items.AddRange(new object[] { Choice.Of(PatchLocatorKind.SessionAddress, "Session address"), Choice.Of(PatchLocatorKind.ModuleOffset, "Module + offset"), Choice.Of(PatchLocatorKind.ModulePattern, "Module pattern") });
 			var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 8, Padding = new Padding(8) };
 			layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 37)); layout.RowStyles.Add(new RowStyle(SizeType.Percent, 25));
 			layout.RowStyles.Add(new RowStyle(SizeType.Percent, 38)); layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 37));
 			layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 60)); layout.RowStyles.Add(new RowStyle(SizeType.Percent, 37));
 			layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 72)); layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
-			var top = Flow(); top.Controls.AddRange(new Control[] { Caption("Code address (hex)"), addressBox, Caption("Selected bytes"), lengthBox, loadButton, Caption("Name"), nameBox });
+			var top = Flow(); top.Controls.AddRange(new Control[] { Caption("Code address (hex or module+offset)"), addressBox, Caption("Selected bytes"), lengthBox, loadButton, Caption("Name"), nameBox });
 			layout.Controls.Add(top, 0, 0); layout.Controls.Add(Group("Original selection, operands and captured registers", originalBox), 0, 1);
 			var editors = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1 }; editors.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58)); editors.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42));
 			editors.Controls.Add(Group("Assembly (NASM, 64-bit)", assemblyBox), 0, 0); editors.Controls.Add(Group("Replacement hex bytes", hexBox), 1, 0); layout.Controls.Add(editors, 0, 2);
@@ -82,8 +82,8 @@ namespace ReClassNET.Forms
 			layout.Controls.Add(Group("Change preview", previewBox), 0, 5);
 			var actions = Flow(); actions.Controls.AddRange(new Control[] { previewButton, applyButton, nopButton, restoreButton, saveButton, followRegisterButton, followOperandButton, reverseButton }); layout.Controls.Add(actions, 0, 6); layout.Controls.Add(status, 0, 7); Controls.Add(layout);
 			syncing = true;
-			addressBox.Text = address.ToString("X16"); nameBox.Text = this.definition.Name; lengthBox.Value = Math.Max(1, Math.Min(65536, this.definition.SelectionLength));
-			modeBox.SelectedItem = this.definition.Mode; semanticBox.SelectedItem = this.definition.HookMode; locatorBox.SelectedItem = this.definition.LocatorKind;
+			addressBox.Text = address == 0 ? "" : address.ToString("X16"); nameBox.Text = this.definition.Name; lengthBox.Value = Math.Max(1, Math.Min(65536, this.definition.SelectionLength));
+			Choice.Select(modeBox, this.definition.Mode); Choice.Select(semanticBox, this.definition.HookMode); Choice.Select(locatorBox, this.definition.LocatorKind);
 			patternBox.Text = this.definition.Pattern ?? ""; entryOffsetBox.Text = this.definition.EntryOffset.ToString(CultureInfo.InvariantCulture);
 			assemblyBox.Text = this.definition.Assembly ?? ""; hexBox.Text = AssemblyService.FormatHex(this.definition.ReplacementBytes ?? new byte[0]); syncing = false;
 			assemblyBox.TextChanged += (s, e) => SourceEdited(PatchSourceKind.Assembly);
@@ -102,7 +102,7 @@ namespace ReClassNET.Forms
 			followRegisterButton.Click += async (s, e) => await RunAsync(FollowRegisterAsync);
 			followOperandButton.Click += async (s, e) => await RunAsync(FollowOperandAsync);
 			reverseButton.Click += async (s, e) => await RunAsync(async () => { await CancelPreparationAsync(); new WatchFinderForm(workspace, Address(), 1, false, true).Show(this); });
-			nopButton.Click += (s, e) => { if (originals == null) return; modeBox.SelectedItem = PatchMode.InPlace; hexBox.Text = AssemblyService.FormatHex(Enumerable.Repeat((byte)0x90, originals.Length).ToArray()); authoritative = PatchSourceKind.Bytes; };
+			nopButton.Click += (s, e) => { if (originals == null) return; Choice.Select(modeBox, PatchMode.InPlace); hexBox.Text = AssemblyService.FormatHex(Enumerable.Repeat((byte)0x90, originals.Length).ToArray()); authoritative = PatchSourceKind.Bytes; };
 			workspace.Manager.Changed += ManagerChanged; workspace.Session.StateChanged += SessionChanged;
 			Shown += async (s, e) =>
 			{
@@ -110,6 +110,7 @@ namespace ReClassNET.Forms
 				// Mono resets multiline TextBox heights when their native handles are
 				// created. Reapply docking after showing so all code panes stay readable.
 				foreach (var box in new[] { originalBox, assemblyBox, hexBox, previewBox }) box.Parent.PerformLayout();
+				if (addressBox.Text.Length == 0) { status.Text = "New patch: enter a code address (hex, or module+offset such as game.exe+0x1234), set Selected bytes, then choose Load selection."; return; }
 				await RunAsync(() => LoadSelectionAsync(true));
 			};
 			FormClosing += EditorClosing; FormClosed += EditorClosed;
@@ -120,7 +121,32 @@ namespace ReClassNET.Forms
 		private static Label Caption(string text) => new Label { Text = text, AutoSize = true, Margin = new Padding(4, 8, 4, 0) };
 		private static FlowLayoutPanel Flow() => new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = true, AutoScroll = true };
 		private static GroupBox Group(string text, Control content) { var group = new GroupBox { Text = text, Dock = DockStyle.Fill, Padding = new Padding(6) }; group.Controls.Add(content); return group; }
-		private ulong Address() { string text = addressBox.Text.Trim(); if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase)) text = text.Substring(2); ulong address; if (!ulong.TryParse(text, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out address)) throw new FormatException("Enter a valid 64-bit hexadecimal code address."); return address; }
+		private ulong Address() { ulong address; string error; if (!DebugWorkspace.TryParseCodeAddress(addressBox.Text, workspace.Process.Modules, out address, out error)) throw new FormatException(error); return address; }
+		private static class Choice
+		{
+			private sealed class Item<T> { public T Value; public string Text; public override string ToString() => Text; }
+			public static object Of<T>(T value, string text) => new Item<T> { Value = value, Text = text };
+			public static void Select<T>(ComboBox box, T value) { box.SelectedItem = box.Items.Cast<object>().FirstOrDefault(i => Equals(((Item<T>)i).Value, value)); }
+			public static T Value<T>(ComboBox box) => box.SelectedItem is Item<T> item ? item.Value : default(T);
+		}
+		private PatchMode SelectedMode => Choice.Value<PatchMode>(modeBox);
+		private PatchLocatorKind SelectedLocator => Choice.Value<PatchLocatorKind>(locatorBox);
+		// Restore acts on this definition's live patch, or on whichever live patch owns the loaded selection.
+		private ActivePatch RestoreTarget()
+		{
+			var patches = workspace.Manager.ActivePatches;
+			return patches.FirstOrDefault(p => p.Id == definition.Id) ?? (originals == null ? null : patches.FirstOrDefault(p => new PatchRange { Address = p.Preview.Address, Length = (ulong)p.InstalledBytes.Length }.Overlaps(loadedAddress, loadedLength)));
+		}
+		private string DefaultPattern()
+		{
+			try
+			{
+				var masked = ReClassNET.MemoryScanner.PatternScanner.CreatePatternFromCode(workspace.Process, (byte[])originals.Clone());
+				if (masked.Length == originals.Length) return masked.ToString();
+			}
+			catch (Exception ex) { System.Diagnostics.Debug.WriteLine("Masked pattern unavailable: " + ex.Message); }
+			return AssemblyService.FormatHex(originals);
+		}
 		private void SelectionEdited() { if (syncing) return; DefinitionEdited(); status.Text = "Selection changed. Load selection to capture complete original instructions."; }
 		private void SourceEdited(PatchSourceKind kind) { if (syncing) return; authoritative = kind; DefinitionEdited(); conversion?.Cancel(); debounce.Stop(); debounce.Start(); }
 		private void DefinitionEdited()
@@ -182,7 +208,7 @@ namespace ReClassNET.Forms
 				assemblyBox.Text = string.Join(Environment.NewLine, decoded.Instructions.Select(i => i.Text));
 				hexBox.Text = AssemblyService.FormatHex(originals); authoritative = PatchSourceKind.Bytes;
 			}
-			if (string.IsNullOrWhiteSpace(patternBox.Text)) patternBox.Text = AssemblyService.FormatHex(originals);
+			if (string.IsNullOrWhiteSpace(patternBox.Text)) patternBox.Text = DefaultPattern();
 			syncing = false;
 			var text = new StringBuilder();
 			var labels = workspace.Process.NamedAddresses.ToDictionary(pair => unchecked((ulong)pair.Key.ToInt64()), pair => pair.Value);
@@ -207,9 +233,9 @@ namespace ReClassNET.Forms
 			if (originals == null || Address() != loadedAddress || (int)lengthBox.Value != loadedLength) throw new InvalidOperationException("Load the selected original instruction span first.");
 			var result = definition.Clone(); result.Name = nameBox.Text.Trim(); if (result.Name.Length == 0) result.Name = "Patch";
 			result.Platform = workspace.Target.Platform; result.Architecture = "x64"; result.SessionAddress = loadedAddress; result.SessionId = workspace.Target.SessionId;
-			result.SelectionLength = loadedLength; result.ExpectedBytes = (byte[])originals.Clone(); result.Mode = (PatchMode)modeBox.SelectedItem; result.HookMode = (HookSemanticMode)semanticBox.SelectedItem;
+			result.SelectionLength = loadedLength; result.ExpectedBytes = (byte[])originals.Clone(); result.Mode = SelectedMode; result.HookMode = Choice.Value<HookSemanticMode>(semanticBox);
 			result.SourceKind = authoritative; result.Assembly = assemblyBox.Text; result.ReplacementBytes = authoritative == PatchSourceKind.Bytes ? AssemblyService.ParseHex(hexBox.Text) : null;
-			result.LocatorKind = (PatchLocatorKind)locatorBox.SelectedItem;
+			result.LocatorKind = SelectedLocator;
 			if (result.LocatorKind != PatchLocatorKind.SessionAddress)
 			{
 				var module = workspace.Target.Modules.SingleOrDefault(m => loadedAddress >= m.BaseAddress && loadedAddress - m.BaseAddress < m.Size);
@@ -220,16 +246,18 @@ namespace ReClassNET.Forms
 			}
 			return result;
 		}
-		private async Task PreviewAsync()
+		private Task PreviewAsync() => PreviewAsync(true);
+		private async Task PreviewAsync(bool confirmRelease)
 		{
+			if (confirmRelease && prepared != null && MessageBox.Show(this, "A hook is prepared and its memory at 0x" + prepared.Allocation.Address.ToString("X") + " is reserved.\n\nPreview again releases this reservation; you will need Prepare hook again before Apply. Continue?", "Release prepared hook?", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) { status.Text = "Preview cancelled; the prepared hook is still reserved. Choose Apply to install it."; return; }
 			await CancelPreparationAsync(); var candidate = BuildDefinition();
 			preview = await workspace.Planner.PreviewAsync(candidate, workspace.Target, operation.Token);
 			RenderPreview(); status.Text = preview.Message ?? "Preview ready. Original " + preview.OriginalBytes.Length + " bytes, installed " + preview.ReplacementBytes.Length + " bytes, NOP padding " + preview.PaddingLength + " bytes.";
 		}
 		private async Task PrepareAsync()
 		{
-			if ((PatchMode)modeBox.SelectedItem != PatchMode.Hook) throw new InvalidOperationException("Choose Hook mode first.");
-			await PreviewAsync(); if (preview.Status != PatchStatus.Previewed) return;
+			if (SelectedMode != PatchMode.Hook) throw new InvalidOperationException("Choose Hook mode first.");
+			await PreviewAsync(false); if (preview == null || preview.Status != PatchStatus.Previewed) return;
 			prepared = await workspace.Planner.PrepareHookAsync(preview, workspace.Target, workspace.Manager, operation.Token);
 			RenderPreview(); status.Text = "Hook reserved and prepared at its final origin. Review the expanded overwrite span and code before Apply.";
 		}
@@ -259,7 +287,18 @@ namespace ReClassNET.Forms
 			PatchResult result; if (prepared != null) result = await workspace.Manager.ApplyAsync(prepared, operation.Token); else if (preview?.CanApply == true) result = await workspace.Manager.ApplyAsync(preview, operation.Token); else throw new InvalidOperationException("A current valid preview or prepared hook is required.");
 			status.Text = result.Message; if (result.Status == PatchStatus.Active && result.Patch != null) { definition = result.Patch.Preview.Definition.Clone(); prepared = null; preview = null; }
 		}
-		private async Task RestoreAsync() { await CancelPreparationAsync(); var result = await workspace.Manager.RestoreAsync(definition.Id, operation.Token); status.Text = result.Message; preview = null; }
+		private async Task RestoreAsync()
+		{
+			var target = RestoreTarget(); if (target == null) throw new InvalidOperationException("No live patch belongs to this definition or overlaps the loaded selection.");
+			await CancelPreparationAsync(); var result = await workspace.Manager.RestoreAsync(target.Id, operation.Token);
+			if (result.Status == PatchStatus.Conflict && result.Patch != null)
+			{
+				var choice = PatchManagerForm.AskPatchConflict(this, result.Message);
+				if (choice == PatchConflictChoice.ForceRestore) result = await workspace.Manager.ForceRestoreAsync(target.Id, operation.Token);
+				else if (choice == PatchConflictChoice.Abandon) result = await workspace.Manager.AbandonAsync(target.Id, operation.Token);
+			}
+			status.Text = result.Message; preview = null; RenderPreview();
+		}
 		private async Task CancelPreparationAsync() { if (prepared == null) return; var result = await workspace.Manager.CancelPreparationAsync(prepared.Id); if (!result.Success) throw new InvalidOperationException(result.Message); prepared = null; preview = null; status.Text = result.Message; }
 		private async Task SaveAsync()
 		{
@@ -274,11 +313,15 @@ namespace ReClassNET.Forms
 				if (!decoded.Success) throw new InvalidOperationException("Cannot save incomplete replacement instructions: " + decoded.Error);
 			}
 			var resolved = await Task.Run(() => new PatchTargetResolver().Resolve(candidate, workspace.Target, operation.Token));
-			if (resolved.Status != PatchResolutionStatus.Resolved || resolved.Address != loadedAddress) throw new InvalidOperationException("Saved locator does not resolve uniquely to this selection: " + resolved.Status + " " + resolved.Message);
+			if (resolved.Status != PatchResolutionStatus.Resolved || resolved.Address != loadedAddress) throw new InvalidOperationException("Saved locator does not resolve uniquely to this selection: " + resolved.Status + " " + resolved.Message + (resolved.Status == PatchResolutionStatus.MultipleMatches ? " Lengthen the pattern with following bytes, replace fewer bytes with ??, or choose Module + offset." : ""));
 			var observed = await Task.Run(() => workspace.Target.ReadExact(loadedAddress, loadedLength));
 			var active = workspace.Manager.ActivePatches.FirstOrDefault(p => p.Id == candidate.Id);
 			if (!observed.SequenceEqual(originals) && (active == null || !observed.SequenceEqual(active.InstalledBytes))) throw new InvalidOperationException("Original or installed bytes changed; the definition was not saved.");
-			repository.Upsert(candidate); definition = repository.Definitions.Single(d => d.Id == candidate.Id); DefinitionEdited();
+			repository.Upsert(candidate); definition = repository.Definitions.Single(d => d.Id == candidate.Id);
+			// Nothing changed since the preview (edits clear it), so it stays valid for the saved revision.
+			if (preview != null) preview.Definition.Revision = definition.Revision;
+			if (prepared != null) prepared.Preview.Definition.Revision = definition.Revision;
+			UpdateButtons();
 			status.Text = candidate.LocatorKind == PatchLocatorKind.SessionAddress ? "Saved inactive session-only draft. After restart, select an address and load a new selection to resolve it." : "Saved definition in the current project. Loading a project keeps patches inactive; save the project file to persist it.";
 		}
 		private async Task FollowPointerAsync(ulong pointer)
@@ -310,7 +353,9 @@ namespace ReClassNET.Forms
 		{
 			using (var dialog = new Form { Text = title, Size = new Size(530, 160), StartPosition = FormStartPosition.CenterParent }) {
 				var choicesBox = new ComboBox { Dock = DockStyle.Top, DropDownStyle = ComboBoxStyle.DropDownList }; choicesBox.Items.AddRange(choices); choicesBox.SelectedIndex = 0;
-				var follow = new Button { Text = "Follow current memory", Dock = DockStyle.Bottom, DialogResult = DialogResult.OK }; dialog.Controls.Add(choicesBox); dialog.Controls.Add(follow); dialog.AcceptButton = follow;
+				var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, FlowDirection = FlowDirection.RightToLeft, Height = 36 };
+				var follow = new Button { Text = "Follow current memory", AutoSize = true, DialogResult = DialogResult.OK }; var cancel = new Button { Text = "Cancel", AutoSize = true, DialogResult = DialogResult.Cancel };
+				buttons.Controls.Add(cancel); buttons.Controls.Add(follow); dialog.Controls.Add(choicesBox); dialog.Controls.Add(buttons); dialog.AcceptButton = follow; dialog.CancelButton = cancel;
 				return dialog.ShowDialog(this) == DialogResult.OK ? choicesBox.SelectedIndex : -1;
 			}
 		}
@@ -328,15 +373,15 @@ namespace ReClassNET.Forms
 			bool editable = !busy && workspace.Target.IsAlive;
 			addressBox.Enabled = lengthBox.Enabled = nameBox.Enabled = assemblyBox.Enabled = hexBox.Enabled = modeBox.Enabled = semanticBox.Enabled = locatorBox.Enabled = patternBox.Enabled = entryOffsetBox.Enabled = editable;
 			loadButton.Enabled = previewButton.Enabled = editable; nopButton.Enabled = editable && originals != null;
-			prepareButton.Enabled = editable && (PatchMode)modeBox.SelectedItem == PatchMode.Hook && workspace.Target.SupportsAllocation;
+			prepareButton.Enabled = editable && SelectedMode == PatchMode.Hook && workspace.Target.SupportsAllocation;
 			applyButton.Enabled = editable && (prepared != null || preview?.CanApply == true);
-			restoreButton.Enabled = !busy && workspace.Manager.ActivePatches.Any(p => p.Id == definition.Id);
+			restoreButton.Enabled = !busy && RestoreTarget() != null;
 			saveButton.Enabled = editable && originals != null && !repository.IsReadOnly;
 			cancelButton.Enabled = !busy && prepared != null;
 			followRegisterButton.Enabled = editable && snapshot != null && snapshot.Registers.Count != 0;
 			followOperandButton.Enabled = editable && originals != null && snapshot != null;
 			reverseButton.Enabled = editable && originals != null;
-			patternBox.Enabled = editable && (PatchLocatorKind)locatorBox.SelectedItem == PatchLocatorKind.ModulePattern; entryOffsetBox.Enabled = patternBox.Enabled;
+			patternBox.Enabled = editable && SelectedLocator == PatchLocatorKind.ModulePattern; entryOffsetBox.Enabled = patternBox.Enabled;
 		}
 		private void ManagerChanged(object sender, EventArgs e) => QueueUpdate();
 		private void SessionChanged(DebugSessionState state) => QueueUpdate();
