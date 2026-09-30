@@ -28,6 +28,11 @@ def verify_demo(root, platform):
     dependencies = json.loads((demo / 'DEPENDENCIES.json').read_text())
     assert dependencies == build['dependencies']
     raylib = dependencies['raylib']
+    fonts = dependencies['fonts']
+    font_license = pathlib.Path(fonts['license'])
+    assert (demo / font_license).read_bytes() == (root / font_license).read_bytes()
+    assert hashlib.sha256((demo / font_license).read_bytes()).hexdigest() == fonts['license_sha256']
+    assert set(fonts['files']) == {'LiberationSans-Regular.ttf', 'LiberationSans-Bold.ttf', 'LiberationMono-Regular.ttf'}
     assert raylib['version'] == '5.5'
     assert raylib['source_url'] == 'https://github.com/raysan5/raylib/archive/refs/tags/5.5.tar.gz'
     assert raylib['source_sha256'] == 'aea98ecf5bc5c5e0b789a76de0083a21a70457050ea4cc2aec7566935f5e258e'

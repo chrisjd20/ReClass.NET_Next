@@ -40,6 +40,16 @@ FetchContent_MakeAvailable(raylib)
 set(GENERATED "${CMAKE_CURRENT_BINARY_DIR}/generated")
 file(MAKE_DIRECTORY "${GENERATED}")
 add_custom_command(
+  OUTPUT "${GENERATED}/fonts.generated.h"
+  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/embed_fonts.py"
+    --assets "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts"
+    --manifest "${CMAKE_CURRENT_SOURCE_DIR}/../../Dependencies/demo-dependencies.json"
+    --output "${GENERATED}/fonts.generated.h"
+  DEPENDS tools/embed_fonts.py ../../Dependencies/demo-dependencies.json
+    assets/fonts/LiberationSans-Regular.ttf assets/fonts/LiberationSans-Bold.ttf
+    assets/fonts/LiberationMono-Regular.ttf
+  VERBATIM)
+add_custom_command(
   OUTPUT "${GENERATED}/layout.h" "${GENERATED}/layout.inc" "${GENERATED}/layout.md"
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_layout.py"
     --schema "${CMAKE_CURRENT_SOURCE_DIR}/tools/layout.json" --output-dir "${GENERATED}" --guide "${GENERATED}/layout.md"
@@ -53,6 +63,7 @@ add_custom_command(
   DEPENDS tools/generate-lessons.py content/lessons.json tools/layout.json src/tutorial.h
   VERBATIM)
 add_custom_target(breakout-content DEPENDS
+  "${GENERATED}/fonts.generated.h"
   "${GENERATED}/layout.h" "${GENERATED}/layout.inc" "${GENERATED}/layout.md"
   "${GENERATED}/lessons.generated.cpp" "${GENERATED}/GUIDE.html" "${GENERATED}/GUIDE.md")
 add_executable(ReClassBreakout src/main.cpp src/frontend.cpp src/progress.cpp src/game.cpp src/teaching.asm "${GENERATED}/lessons.generated.cpp")

@@ -39,6 +39,13 @@ current addresses and pointer paths without penalty. Copy values for float scans
 instead of rounding the displayed number. Hints and full solutions are available
 at any time, and tutorial Back/Next never depend on an automatic detector.
 
+Instructions and controls use an embedded readable sans-serif font; numbers use
+a monospace font, while the game branding and panel headings keep their pixel
+style. The whole interface scales with larger windows, including text and mouse
+targets. A-/A+ still adjusts your preferred reading size. Wide windows reserve
+more space for the tutorial, and extreme widths use balanced outer margins.
+Controls and common mistakes expand within the tutorial when you need them.
+
 Observed completion records an outcome, not proof of which editing method was
 used. Structure saving, event filtering and trace export include manual
 acknowledgments. Local progress stores tutorial position, completion and display

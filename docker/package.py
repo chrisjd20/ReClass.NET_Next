@@ -16,6 +16,7 @@ assembly_dependencies['nasm'] = json.loads(pathlib.Path('/native/nasm/build.json
 demo_dependencies = json.loads(pathlib.Path('/dependencies/demo-dependencies.json').read_text())
 for key in ('license', 'bundled_glfw_license', 'bundled_third_party_notices'):
     assert hashlib.sha256((pathlib.Path('/dependencies') / demo_dependencies['raylib'][key]).read_bytes()).hexdigest() == demo_dependencies['raylib'][key + '_sha256']
+assert hashlib.sha256((pathlib.Path('/dependencies') / demo_dependencies['fonts']['license']).read_bytes()).hexdigest() == demo_dependencies['fonts']['license_sha256']
 demo_builds = {}
 for platform, executable in [('windows', 'ReClassBreakout.exe'), ('linux', 'ReClassBreakout')]:
     demo_output = pathlib.Path('/native/demo') / platform
@@ -83,6 +84,8 @@ for platform, native_name in [('windows', 'NativeCore.dll'), ('linux', 'NativeCo
     for key in ('license', 'bundled_glfw_license', 'bundled_third_party_notices'):
         license_name = pathlib.Path(demo_dependencies['raylib'][key])
         shutil.copy(pathlib.Path('/dependencies') / license_name, demo / license_name)
+    font_license = pathlib.Path(demo_dependencies['fonts']['license'])
+    shutil.copy(pathlib.Path('/dependencies') / font_license, demo / font_license)
     if platform == 'linux':
         shutil.copy('/scripts/run-demo.sh', demo / 'run-demo.sh')
         (demo / 'run-demo.sh').chmod(0o755)

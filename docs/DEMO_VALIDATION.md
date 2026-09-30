@@ -8,7 +8,7 @@ The user's final instruction excludes testing the ReClass GUI against the game.
 The completed native-service evidence below is retained; it is not described as
 a manual ReClass GUI walkthrough. Final remaining checks concern the game only.
 
-## Delivered artifacts and identity
+## Original campaign delivery and identity
 
 - `dist/ReClass.NET_Next-windows-x64.zip`: `Demo/ReClassBreakout.exe`.
 - `dist/ReClass.NET_Next-linux-x64.tar.gz`: `Demo/ReClassBreakout` and `Demo/run-demo.sh`.
@@ -17,7 +17,7 @@ a manual ReClass GUI walkthrough. Final remaining checks concern the game only.
 - `dist/build-manifest.json` records build environment and component identities;
   `dist/SHA256SUMS` records archive identities.
 
-Final integration export: 2026-09-30 13:39:18 UTC. Build source-tree digest:
+Original campaign integration export: 2026-09-30 13:39:18 UTC. Build source-tree digest:
 `a02362055bc60ab500fbbe0d87d73d520fc38af584e42eae5e7571c93c5b3957`.
 This identifies the build input at compile time; this subsequent validation record
 and roadmap completion annotations are documentation updates.
@@ -153,3 +153,47 @@ Both guides are ordinary packaged files independent of the running game.
 - Runtime logs/screenshots are local ignored evidence under `dist/`, not source
   assets. Rebuilding changes executable identities and may require resaving
   tutorial patch definitions. Gameplay reset never restores external code.
+
+## Readable UI revision — 2026-09-30
+
+This revision replaces dense pixel body text with embedded Liberation Sans regular
+and bold, uses Liberation Mono for numeric values and revealed addresses, and
+retains pixel branding/panel headings. Unmodified font files are pinned by SHA-256
+and embedded during the build; both packages carry the Liberation font license.
+No font installation, loose assets or runtime download is required.
+
+Window resizing now scales text, geometry, mouse coordinates and scroll clipping
+together (bounded logical UI scale from 1 to 2.5). The tutorial gets 41% of the
+usable three-column area, and extreme widths use outer margins. A-/A+ remains
+available for reading preferences. Larger line spacing, bold step titles, improved
+contrast, panel shadows and an expandable controls/reference section reduce
+density. Minimum-width focus indicators avoid heading collisions; delayed compact
+tooltips avoid covering instructions immediately after clicks.
+
+One focused game-only check per platform passed small, normal and large render
+sizes and exactly one paused Fire once mouse activation at each size. Linux also
+verified scaled hint/reveal/Next/Copy hit targets, clipboard content, and the
+non-firing room menu. Screenshots from both platforms were inspected. Evidence:
+`dist/breakout-readable-ui/linux-smoke.log`,
+`dist/breakout-readable-ui/windows-smoke-launch.log`, and their platform screenshot
+directories. A final minimum-size screenshot checks only the heading/tooltip
+refinement discovered during that review, under
+`dist/breakout-readable-ui/final-small/`.
+
+No campaign, self-check, ReClass GUI integration, scanner suite or legacy suite
+was repeated. The previous campaign remains historical evidence for the unchanged
+simulation/teaching code, rather than a claim that saved definitions from the old
+image match this rebuilt executable. Old saved definitions need the new matching
+image identity, as explained by the guide.
+
+Current UI package export: 2026-09-30T14:08:54.580098+00:00. Source-tree digest:
+`bd34a103ec75343980ea89974aba96b13238a7c6e8d0491f5b99187f290881a5`.
+
+| Current game | SHA-256 |
+|---|---|
+| Windows | `defb1a6f3111b84b0b711aef11f2637dd1ecb74f0f5988482bac97c07510a8a5` |
+| Linux | `e5df10b87957b64afef353222a56e48a44ffbb4ede8078c699d3388637272843` |
+
+The normal combined export and integrated artifact verifier passed for both
+archives, including the new font license metadata. Build evidence:
+`dist/breakout-readable-ui-export.log`.

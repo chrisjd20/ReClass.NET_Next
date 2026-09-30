@@ -14,5 +14,18 @@
     "bundled_third_party_notices": "Licenses/raylib-third-party-NOTICES.txt",
     "bundled_third_party_notices_sha256": "0e4d95323b946f59611a68ed80c487232fba2177399feebda9b25d92cb558f43"
   },
-  "verification": "SHA-256 measured from the exact official HTTPS 5.5 tag archive downloaded 2026-09-30; CMake verifies it before extraction. License hashes measured from that archive."
+  "verification": "SHA-256 measured from the exact official HTTPS 5.5 tag archive downloaded 2026-09-30; CMake verifies it before extraction. License hashes measured from that archive.",
+  "fonts": {
+    "family": "Liberation Sans / Liberation Mono",
+    "version": "2.1.5",
+    "source_url": "https://github.com/liberationfonts/liberation-fonts/releases/tag/2.1.5",
+    "license": "Licenses/LiberationFonts-LICENSE.txt",
+    "license_sha256": "1fb105af68159ba34eaa7da1885e5cd748c401cd5186ffd316cd94f52c1e2fb3",
+    "embedding": "Unmodified TTF assets embedded in the game executable; no system-font dependency",
+    "files": {
+      "LiberationSans-Regular.ttf": "bade59d822652f76e6941aa87b40a87c13d1cc70db98ededb5011127efafd1d3",
+      "LiberationMono-Regular.ttf": "5883330d94debd992952cd8f0571b225f478c2d797d3f36c7521b0a5c9bde0f2",
+      "LiberationSans-Bold.ttf": "1b5f2da6f4cadce4c05b9ecebe3a6fcd374eb95ae443605e799f4c3287978939"
+    }
+  }
 }
