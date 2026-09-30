@@ -1,0 +1,36 @@
+{
+  "architecture": "x86_64",
+  "structs": [
+    {"name":"Weapon","size":36,"alignment":4,"fields":[
+      {"name":"name","type":"char[24]","offset":0,"size":24},
+      {"name":"damage","type":"int32","offset":24,"size":4},
+      {"name":"projectileSpeed","type":"float32","offset":28,"size":4},
+      {"name":"cooldown","type":"float32","offset":32,"size":4}]},
+    {"name":"Inventory","size":24,"alignment":8,"fields":[
+      {"name":"slots","type":"Weapon*[2]","offset":0,"size":16},
+      {"name":"equipped","type":"Weapon*","offset":16,"size":8}]},
+    {"name":"Actor","size":72,"alignment":8,"fields":[
+      {"name":"health","type":"int32","offset":0,"size":4},
+      {"name":"ammo","type":"int32","offset":4,"size":4},
+      {"name":"speed","type":"float32","offset":8,"size":4},
+      {"name":"charge","type":"float32","offset":12,"size":4},
+      {"name":"x","type":"float32","offset":16,"size":4},
+      {"name":"y","type":"float32","offset":20,"size":4},
+      {"name":"flags","type":"uint32","offset":24,"size":4},
+      {"name":"faction","type":"uint32","offset":28,"size":4},
+      {"name":"clearance","type":"uint32","offset":32,"size":4},
+      {"name":"keycard","type":"uint8","offset":36,"size":1},
+      {"name":"_padding0","type":"uint8[3]","offset":37,"size":3},
+      {"name":"callsign","type":"char[24]","offset":40,"size":24},
+      {"name":"inventory","type":"Inventory*","offset":64,"size":8}]},
+    {"name":"World","size":40,"alignment":8,"fields":[
+      {"name":"player","type":"Actor*","offset":0,"size":8},
+      {"name":"enemies","type":"Actor*[2]","offset":8,"size":16},
+      {"name":"room","type":"int32","offset":24,"size":4},
+      {"name":"remainingTime","type":"float32","offset":28,"size":4},
+      {"name":"corridorDistance","type":"float32","offset":32,"size":4},
+      {"name":"doorOpen","type":"uint8","offset":36,"size":1},
+      {"name":"trialRunning","type":"uint8","offset":37,"size":1},
+      {"name":"_padding0","type":"uint8[2]","offset":38,"size":2}]}
+  ]
+}

@@ -34,3 +34,20 @@ full parity for unrelated Windows integrations or legacy plugin providers.
 
 BUILD.json records the source and toolchain versions. The repository documents
 automated compatibility checks and manual desktop validation steps.
+
+ReClass: Breakout is the bundled 12-room memory editing tutorial. Launch
+./Demo/run-demo.sh from a graphical desktop, then attach ReClass to the displayed
+ReClassBreakout process/PID. Open Demo/GUIDE.html in your browser for the offline
+guide, or read Demo/GUIDE.md and Demo/layout.md. The guide remains available when
+the debugger suspends the whole game process. Use --room N to start a room;
+--self-check runs the bounded lesson sanity batch without opening a window.
+
+The game uses statically built raylib 5.5 with the GLFW X11 backend and no audio.
+It requires OpenGL 3.3, a compatible graphics driver, libstdc++ from GCC 11 or
+newer, and X11/XWayland libraries. On Ubuntu/Debian the desktop dependencies are:
+  sudo apt-get install libgl1 libgl1-mesa-dri libx11-6 libxrandr2 libxinerama1 libxcursor1 libxi6 libstdc++6
+Only this demo opts into same-user sibling inspection using a process-level
+ptrace allowance. Its attachment help reports failure; host ptrace policy is
+never changed. Simulation starts paused. Reset room resets gameplay data;
+restore external patches through ReClass before leaving patching rooms.
+Demo/DEPENDENCIES.json and Demo/Licenses record the raylib pin and notices.

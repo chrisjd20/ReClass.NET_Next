@@ -1,0 +1,515 @@
+{
+  "introduction": "ReClass: Breakout is a 12-room single-player memory-editing practice game. Every room is selectable from the start. All values and types are intentionally visible, hints and optional address reveals have no penalty, and outcomes report only what the game observed. This offline guide is generated from the same lesson source as the in-game tutorial.",
+  "common_instructions": "Controls: Back / Next move freely through steps; Show hint, Reveal address, Show solution and Copy instructions are available without penalty. Return to menu selects any room. A text-size setting and panel scrolling keep long instructions readable. Every room starts with simulation paused. Fire once, Take one hit, Recharge once (+5), Swap weapon and Evaluate door perform one relevant action while paused; Advance one tick advances one fixed 1/60-second update. Movement uses WASD/arrows; aiming/firing needs playfield focus so clicking UI cannot fire. Losing focus pauses simulation, and returning focus does not resume it. Simulation pause keeps rendering/live values usable. ReClass debugger Pause suspends the entire process, including this window: use the offline guide until Resume. Reset room resets gameplay data only and never restores externally patched code. Use Restore original / Restore all before leaving patching rooms. Restarting the executable creates a fresh process. Outcomes do not prove which editing technique was used; save project/trace steps can be acknowledged manually.",
+  "layout_defaults": {
+    "actor": {
+      "size": 72,
+      "health": 0,
+      "ammo": 4,
+      "speed": 8,
+      "charge": 12,
+      "x": 16,
+      "y": 20,
+      "flags": 24,
+      "faction": 28,
+      "faction_from_ammo": 24,
+      "clearance": 32,
+      "keycard": 36,
+      "callsign": 40,
+      "inventory": 64
+    },
+    "inventory": {
+      "slots": 0,
+      "equipped": 16
+    },
+    "weapon": {
+      "name": 0,
+      "damage": 24,
+      "projectileSpeed": 28,
+      "cooldown": 32
+    },
+    "world": {
+      "player": 0
+    },
+    "ammo": {
+      "signature": "52 43 42 52 4B 41 4D 4D 4F 35 35 21 A7 3C 6E 91",
+      "signature_entry_offset": 16
+    }
+  },
+  "lessons": [
+    {
+      "id": 1,
+      "title": "Empty Magazine",
+      "objective": "Start: ammo 12 (int32), 20 stationary targets. Destroy all 20 without using Reload to 12 during the completion attempt.",
+      "concept": "A value scan compares memory with the exact value and type you choose. Ammo is a signed 4-byte integer. Many unrelated addresses contain 12; a controlled change distinguishes the real field.",
+      "steps": [
+        {
+          "title": "Attach and find candidates",
+          "text": "In ReClass, open the process browser, select the process name and PID shown by this game, and click Attach to Process. Open Process → Memory Searcher... (the Scanner window). Keep game simulation paused; the game window and live values remain usable. Select Value Type: Integer (4 Bytes), Scan Type: Is Equal, enter 12, and click First Scan. Writable/private memory is useful here; do not restrict the scan to executable memory.",
+          "expected": "Several candidates can match 12. The live Ammo field remains 12."
+        },
+        {
+          "title": "Narrow after one shot",
+          "text": "Aim at a stationary target and click Fire once. Ammo becomes 11. Enter 11, leave Is Equal selected, and click Next Scan. Repeat with one shot, 10, and Next Scan if several results remain.",
+          "expected": "Exactly one round is consumed per Fire once. Candidates tracking 12 → 11 → 10 remain."
+        },
+        {
+          "title": "Edit and verify",
+          "text": "Use the Scanner result context menu Add selected results to address list, then right-click the entry in the address list and choose Change... → Value, or Create class at address and edit the typed node value. Write 100 to the candidate int32. Observe Ammo before firing again, while still paused. If another candidate changed, undo that data edit and continue narrowing.",
+          "expected": "The game immediately displays Ammo 100 without resuming simulation."
+        },
+        {
+          "title": "Complete a clean attempt",
+          "text": "Use Reset room if necessary, reacquire the live ammo field, write 100, and fire at each target. Do not use Reload to 12 during this attempt. Reload is available for scan practice but invalidates the no-reload attempt.",
+          "expected": "All 20 targets are destroyed; if every shot hits, ammo goes from 100 to 80. The observed result does not prove that you used scanning."
+        }
+      ],
+      "hints": [
+        "The live type is int32; Float (4 Bytes) interprets different bits.",
+        "Reveal address gives the current ammo address. It is an optional shortcut, with no penalty."
+      ],
+      "solutions": [
+        "First Scan Integer (4 Bytes) = 12; Fire once, Next Scan = 11; Fire once, Next Scan = 10. Add the surviving address, edit its value to 100.",
+        "For a fresh completion attempt, Reset room, aim and use Fire once for all 20 targets after writing 100. Keep using the current field address from Reveal address if needed."
+      ],
+      "restoration": "Use Reset room to reset gameplay data. Reset room never restores externally patched instructions. Data edits need no code restoration; restarting the executable creates a fresh process."
+    },
+    {
+      "id": 2,
+      "title": "Battery Basics",
+      "objective": "Start: charge 40.0 (float32). Set charge to at least 90 and activate the reactor.",
+      "concept": "Practice Unknown Initial Value even though charge is visible. Relative scans compare with the previous scan snapshot. A bar is a rendering of the same float, not a separate percentage integer.",
+      "steps": [
+        {
+          "title": "Practice an unknown scan",
+          "text": "In ReClass, open the process browser, select the process name and PID shown by this game, and click Attach to Process. Open Process → Memory Searcher... (the Scanner window). Keep game simulation paused; the game window and live values remain usable. Select Value Type: Float (4 Bytes), Scan Type: Unknown Initial Value, then First Scan. Do not type the visible charge as the initial search.",
+          "expected": "The initial scan stores candidates. Charge remains 40.0."
+        },
+        {
+          "title": "Use controlled comparisons",
+          "text": "Click Recharge once (+5), select Has Increased, and Next Scan. Click Drain once (-5), select Has Decreased, and Next Scan. With no action, select Has Not Changed and Next Scan.",
+          "expected": "Charge follows 40 → 45 → 40 → 40. Unrelated changing fields are filtered out."
+        },
+        {
+          "title": "Set and evaluate",
+          "text": "Use the Scanner result context menu Add selected results to address list, then right-click the entry in the address list and choose Change... → Value, or Create class at address and edit the typed node value. Write 95.0 to the surviving charge float. Click Activate reactor while paused.",
+          "expected": "The live charge and bar show 95.0; the reactor activates because charge is at least 90."
+        },
+        {
+          "title": "Check your interpretation",
+          "text": "Repeat a Recharge once (+5) and verify 100.0. Check the float value and its hexadecimal representation in the live panel; use the round-trip decimal when copying a float.",
+          "expected": "One recharge changes charge by exactly 5. A float bit pattern is not an integer percentage."
+        }
+      ],
+      "hints": [
+        "Use Has Not Changed only when no charge action happened since the previous scan.",
+        "If no result remains, reset the scan and repeat in the documented order. Float rounding modes can obscure tiny differences; these increments are exactly representable."
+      ],
+      "solutions": [
+        "First Scan Float (4 Bytes), Unknown Initial Value at charge 40; Recharge once (+5) and Next Scan Has Increased at 45; Drain once (-5) and Next Scan Has Decreased at 40; Next Scan Has Not Changed.",
+        "Write 95.0 to Actor charge at offset {{actor.charge}}, then Activate reactor. The minimum acceptable value is 90.0."
+      ],
+      "restoration": "Use Reset room to reset gameplay data. Reset room never restores externally patched instructions. Data edits need no code restoration; restarting the executable creates a fresh process."
+    },
+    {
+      "id": 3,
+      "title": "Speed Trial",
+      "objective": "Start: speed 60.0 (float32), position (70, 180), 8 seconds remaining. Reach exit X = 650 before time expires.",
+      "concept": "Speed and position are separate floats. With speed 60 units/second, travelling 580 units requires about 9.67 seconds, longer than this trial. Simulation pause stops the trial clock; Advance one tick advances exactly 1/60 second.",
+      "steps": [
+        {
+          "title": "Locate the speed float",
+          "text": "In ReClass, open the process browser, select the process name and PID shown by this game, and click Attach to Process. Open Process → Memory Searcher... (the Scanner window). Keep game simulation paused; the game window and live values remain usable. Scan Float (4 Bytes), Is Equal, 60. Use Reveal address if constant candidates are hard to distinguish. Create class at address and display adjacent Actor speed, charge, X and Y floats.",
+          "expected": "Actor offsets are speed {{actor.speed}}, charge {{actor.charge}}, X {{actor.x}}, Y {{actor.y}}. Position is not speed."
+        },
+        {
+          "title": "Edit while paused",
+          "text": "Use the Scanner result context menu Add selected results to address list, then right-click the entry in the address list and choose Change... → Value, or Create class at address and edit the typed node value. Set speed to 120.0. The timer stays fixed while paused. Click Start trial while paused. Focus the playfield, hold Right or D and use Advance one tick to inspect movement, or Resume simulation and move right.",
+          "expected": "One fixed tick moves about 2 units at speed 120. Live speed changes immediately while paused; X changes only when movement is stepped or resumed."
+        },
+        {
+          "title": "Run the trial",
+          "text": "Reset room for a fresh 8-second attempt, write speed 120.0 again, click Start trial, focus the playfield, Resume simulation and hold Right/D until X reaches 650. Pause afterward.",
+          "expected": "At 120 units/second the 580-unit corridor takes about 4.83 seconds, leaving about 3.17 seconds."
+        },
+        {
+          "title": "Avoid misleading changes",
+          "text": "Inspect X and Y as adjacent floats. Editing X can teleport the robot and produce an outcome, but for this exercise verify that changing speed changes distance per tick. Non-finite speed values suspend movement and display the raw value.",
+          "expected": "The completion indicator records reaching the exit in time; it cannot establish which memory technique was used."
+        }
+      ],
+      "hints": [
+        "A constant float scan can retain many candidates. The live Actor pointer and offset reveal distinguish speed from X.",
+        "If the timer expires, Reset room restores the timer and gameplay values; edit speed again."
+      ],
+      "solutions": [
+        "Write 120.0 to player Actor + {{actor.speed}}. Click Start trial. Focus the playfield, Resume simulation, and move right to X >= 650 within 8 seconds.",
+        "At speed60 the deadline cannot be met by normal movement; speed120 yields ~2 units/tick and completes the corridor in ~290 ticks."
+      ],
+      "restoration": "Use Reset room to reset gameplay data. Reset room never restores externally patched instructions. Data edits need no code restoration; restarting the executable creates a fresh process."
+    },
+    {
+      "id": 4,
+      "title": "Security Clearance",
+      "objective": "Start: keycard 0 (uint8), flags 2 (uint32): alarm bit 1 is set and power bit 0 is clear. Open the door with keycard present, power on and alarm off.",
+      "concept": "A boolean occupies one byte here; a flags word packs independent bits. Preserve unrelated bits instead of overwriting an entire word blindly. Bits are numbered from zero, so power mask=1 and alarm mask=2.",
+      "steps": [
+        {
+          "title": "Find the byte and word",
+          "text": "In ReClass, open the process browser, select the process name and PID shown by this game, and click Attach to Process. Open Process → Memory Searcher... (the Scanner window). Keep game simulation paused; the game window and live values remain usable. Use Value Type: Byte for keycard, and Integer (4 Bytes) for flags. Practice the game controls that toggle keycard, power and alarm, then narrow corresponding scans. Create a class at the player Actor address.",
+          "expected": "Keycard is at offset {{actor.keycard}}; flags at {{actor.flags}}. Keycard uses one byte, flags uses four."
+        },
+        {
+          "title": "Inspect flags as bits and bytes",
+          "text": "Display flags with a bits view and a neighboring raw hex view. Starting 2 is binary 00000010 and little-endian bytes 02 00 00 00. Toggle power once to compare 3 = 00000011.",
+          "expected": "Only bit0 changes when power toggles. Turning alarm off clears bit1 without clearing power."
+        },
+        {
+          "title": "Make a preserving edit",
+          "text": "Edit keycard to 1. Read the current flags F and set (F | 1) & ~2. Example: F=2 → 1; if an unrelated bit was set, F=0x82 → 0x81. Click Evaluate door.",
+          "expected": "The door opens only when keycard equals1, power bit0 is set and alarm bit1 is clear."
+        },
+        {
+          "title": "Check common mistakes",
+          "text": "Writing a 4-byte integer at the keycard address can overwrite padding. Replacing flags with zero clears the needed power bit. If the door remains closed, compare all three live conditions, then Evaluate door again.",
+          "expected": "You can identify the failing field directly while the simulation stays paused."
+        }
+      ],
+      "hints": [
+        "The required flags bits are power=0x1 and alarm=0x2. A flags edit should preserve every other bit.",
+        "Reveal address lists the live byte and word addresses with their types."
+      ],
+      "solutions": [
+        "Set keycard byte at player + {{actor.keycard}} to 1. With default flags2, write flags1 at player + {{actor.flags}}, then Evaluate door.",
+        "For general flagsF, compute (F | 0x1) & ~0x2. Example0x82 becomes0x81, preserving bit7."
+      ],
+      "restoration": "Use Reset room to reset gameplay data. Reset room never restores externally patched instructions. Data edits need no code restoration; restarting the executable creates a fresh process."
+    },
+    {
+      "id": 5,
+      "title": "Identity Check",
+      "objective": "Start: callsign ROOKIE in a 24-byte UTF-8/ASCII buffer; clearance 0 (enum). Door accepts ENGINEER and engineer clearance 2. Save the named structure project manually.",
+      "concept": "A structure describes how nearby bytes form fields; it does not allocate or relocate the game object. Fixed-size strings need room for a terminating zero. An enum gives names to integer values.",
+      "steps": [
+        {
+          "title": "Create the Actor definition",
+          "text": "In ReClass, open the process browser, select the process name and PID shown by this game, and click Attach to Process. Open Process → Memory Searcher... (the Scanner window). Keep game simulation paused; the game window and live values remain usable. Reveal the player Actor address and Create class at address. Name the class BreakoutActor. Replace raw nodes with health int32, ammo int32, speed/charge/X/Y Float, flags/faction/clearance uint32, keycard byte, explicit padding, callsign UTF-8 string of 24 bytes and inventory pointer.",
+          "expected": "The Actor is {{actor.size}} bytes. Offsets: health{{actor.health}}, ammo{{actor.ammo}}, speed{{actor.speed}}, charge{{actor.charge}}, X{{actor.x}}, Y{{actor.y}}, flags{{actor.flags}}, faction{{actor.faction}}, clearance{{actor.clearance}}, keycard{{actor.keycard}}, callsign{{actor.callsign}}, inventory{{actor.inventory}}."
+        },
+        {
+          "title": "Name fields and define the enum",
+          "text": "Rename fields so values remain understandable. Use Edit Enum... to associate clearance values 0=Visitor, 1=Technician, 2=Engineer. Treat the field as a 4-byte enum; enum names do not change its storage width.",
+          "expected": "ROOKIE and clearance0 appear next to the other authoritative player fields."
+        },
+        {
+          "title": "Edit identity and check",
+          "text": "Edit the callsign string to ENGINEER, followed by a zero terminator within its 24-byte buffer. Write clearance2. Click Evaluate door.",
+          "expected": "The live string reads ENGINEER and the door opens. Changing only the displayed enum label does not change memory."
+        },
+        {
+          "title": "Save and reopen a project",
+          "text": "Use Save Project on the toolbar or File → Save as... and save BreakoutTutorial.rcnet. Reopen the project and verify the named BreakoutActor and fields. Optionally use Show C++ Code of Class to inspect an exported declaration. Return to the game and click Acknowledge saved project after verifying the reopened structure.",
+          "expected": "The structure definition survives saving. Current absolute addresses may change in a new process; reacquire them. Saving is a guided manual step, not an automatic room detector."
+        }
+      ],
+      "hints": [
+        "ENGINEER needs 8 bytes plus a zero; it fits in 24. Do not write past the buffer into inventory.",
+        "The inventory pointer is 8 bytes on x64. Keep the explicit 3-byte padding between keycard and callsign."
+      ],
+      "solutions": [
+        "Define the Actor using the displayed offsets, set the callsign buffer to ENGINEER followed by a zero terminator, write clearance2 at offset {{actor.clearance}}, and Evaluate door.",
+        "Save Project persists class layouts and saved definitions. It does not save your game memory edits or automatically reapply patches. Reopen BreakoutTutorial.rcnet and follow the current root pointer to regain the Actor address."
+      ],
+      "restoration": "Use Reset room to reset gameplay data. Reset room never restores externally patched instructions. Data edits need no code restoration; restarting the executable creates a fresh process."
+    },
+    {
+      "id": 6,
+      "title": "Replacement Parts",
+      "objective": "Start: two weapon slots. Equipped weapon damage 5; each armored target requires damage at least 20 and starts with health 30. Upgrade one weapon, defeat a target, Swap weapon, then upgrade the replacement and defeat the next target.",
+      "concept": "Follow pointers to their current targets instead of assuming a previously copied absolute address remains valid. A pointer array stores addresses, not inline Weapon objects. Swapping allocates a replacement before retiring the old object, so the equipped address changes.",
+      "steps": [
+        {
+          "title": "Follow the root to the player",
+          "text": "In ReClass, open the process browser, select the process name and PID shown by this game, and click Attach to Process. Open Process → Memory Searcher... (the Scanner window). Keep game simulation paused; the game window and live values remain usable. Reveal the module-resident root pointer. Define World with player Actor* at offset {{world.player}}. Follow the World pointer, then player, then Actor inventory pointer at offset {{actor.inventory}}. Define Inventory with two Weapon* slots and one equipped Weapon*.",
+          "expected": "Inventory slots start at offset {{inventory.slots}} and use 8 bytes each. Equipped pointer is at offset {{inventory.equipped}}. The live reveal shows the entire current path."
+        },
+        {
+          "title": "Define and upgrade Weapon",
+          "text": "Follow equipped. Define Weapon: name fixed char[24] at {{weapon.name}}, damage int32 at {{weapon.damage}}, projectileSpeed float32 at {{weapon.projectileSpeed}}, cooldown float32 at {{weapon.cooldown}}. Set damage to30. Aim at the armored target and Fire once.",
+          "expected": "A damage30 shot defeats the health30 armored target. Damage5 cannot penetrate armor; speed and cooldown are distinct fields."
+        },
+        {
+          "title": "Observe replacement",
+          "text": "Record the current equipped address, click Swap weapon once, and read Inventory → equipped again. Follow the newly stored address. Avoid editing the old Weapon address; the game keeps owned-pointer checks and can report an invalid externally edited pointer.",
+          "expected": "The equipped pointer changes. The replacement starts at its normal weapon values, so the old upgrade does not automatically carry over."
+        },
+        {
+          "title": "Upgrade the second object",
+          "text": "Set the replacement Weapon damage to30, aim at the second target, and Fire once. Compare the two slot pointers and equipped pointer; rename nodes in the saved structure for future use.",
+          "expected": "Both target defeats and the intervening swap are observed. Optional address reveals are updated after replacement."
+        }
+      ],
+      "hints": [
+        "A pointer node follows the 64-bit address stored in the field. Adding an offset to the pointer-storage address is not the same as following it.",
+        "The reveal uses World → player → inventory → equipped → damage. Re-read equipped after every Swap weapon."
+      ],
+      "solutions": [
+        "Follow the module root to World, player Actor, inventory and equipped Weapon. Write damage30 at Weapon + {{weapon.damage}} and fire at target1.",
+        "Swap weapon, follow the new equipped pointer, write its damage30, and fire at target2. Keep both slot nodes as pointers in an array; do not reuse the previous absolute Weapon address."
+      ],
+      "restoration": "Use Reset room to reset gameplay data. Reset room never restores externally patched instructions. Data edits need no code restoration; restarting the executable creates a fresh process."
+    },
+    {
+      "id": 7,
+      "title": "Damage Control",
+      "objective": "Start: health 100. Take one hit subtracts 10 via a dedicated assembly routine. NOP its writer, show three unchanged hits, then restore and show a 10-point hit.",
+      "concept": "Find a writer by observation, then confirm its instruction boundary before patching. Replacing code changes future executions; editing health changes only data. Optional turret damage is slow and stops with simulation pause.",
+      "steps": [
+        {
+          "title": "Capture and confirm the damage writer",
+          "text": "In ReClass, open the process browser, select the process name and PID shown by this game, and click Attach to Process. Open Process → Memory Searcher... (the Scanner window). Keep game simulation paused; the game window and live values remain usable. On the correct data address, choose Find out what writes to this address.... Perform the Take one hit once. Select the writer candidate, choose Confirm next execution, then perform Take one hit once more. A data-watch record is After context, so its event RIP can be the following instruction: confirmation supplies the actual executed boundary and Before registers. Choose Inspect / edit on the confirmed instruction. Use health int32 at player + {{actor.health}} as the watched address.",
+          "expected": "Normal hits produce 100 → 90 → 80. The confirmed Before context has RAX pointing at Actor health and identifies sub dword [rax], 10."
+        },
+        {
+          "title": "Preview a NOP patch",
+          "text": "In Instruction inspector and assembly editor keep Patch mode InPlace. Load the complete confirmed damage instruction, click NOP selection, then Preview. Check selected bytes, original disassembly and replacement0x90 bytes. Apply only after the preview has a verified complete span.",
+          "expected": "Replacing this one writer with NOPs stops its subtraction. Do not select a candidate boundary that was not confirmed."
+        },
+        {
+          "title": "Demonstrate no damage",
+          "text": "Resume the debugger, Reset room to health100 (the code remains patched), and click Take one hit three times. Leave any optional turret off for this deterministic demonstration.",
+          "expected": "Health remains100 after all three controlled hits; the game records the observed outcome."
+        },
+        {
+          "title": "Restore and confirm",
+          "text": "Use Restore original or Patches → Restore all. Resume the debugger, then Take one hit once more.",
+          "expected": "Health changes100 → 90 after restoration. The room requires both the unchanged phase and the restored damage phase."
+        }
+      ],
+      "hints": [
+        "A data-watch After snapshot does not establish that event RIP is the writer. Confirm next execution resolves the actual boundary.",
+        "If Reset room makes a patch seem gone, watch the next hit: data reset cannot restore code."
+      ],
+      "solutions": [
+        "Confirm sub dword [rax], 10 using the player health data watch, Inspect / edit, InPlace, NOP selection, Preview, Apply.",
+        "Resume, Reset room, Take one hit ×3: health100. Restore original, Resume, Take one hit: health90."
+      ],
+      "restoration": "In the assembly editor use Restore original, or open Patches and use Restore all. Stop any watches, Resume the debugger, and only then return to the game. Reset room resets gameplay data only; it does not restore patched code. Restore code before leaving this room. Restarting the executable creates a fresh unpatched process."
+    },
+    {
+      "id": 8,
+      "title": "Reverse Engineering",
+      "objective": "Start: ammo12. Change dec dword [rax] into inc dword [rax]. Three shots must increase ammo to15; restoration must make the next shot decrease it.",
+      "concept": "Assembly and hex are two views of the same replacement. At this site RAX points to ammo (Actor + {{actor.ammo}}), not health. x64 dec dword [rax] encodes FF 08; inc dword [rax] encodes FF 00.",
+      "steps": [
+        {
+          "title": "Confirm the ammo instruction",
+          "text": "In ReClass, open the process browser, select the process name and PID shown by this game, and click Attach to Process. Open Process → Memory Searcher... (the Scanner window). Keep game simulation paused; the game window and live values remain usable. On the correct data address, choose Find out what writes to this address.... Perform the controlled action once. Select the writer candidate, choose Confirm next execution, then perform that action once more. A data-watch record is After context, so its event RIP can be the following instruction: confirmation supplies the actual executed boundary and Before registers. Choose Inspect / edit on the confirmed instruction. Watch player ammo, use Fire once for both discovery and confirmation, and verify RAX equals the displayed ammo address.",
+          "expected": "Normal shots decrement ammo. The confirmed code selection is the 2-byte dec dword [rax], not the watched data address."
+        },
+        {
+          "title": "Edit and preview",
+          "text": "Set Patch mode InPlace. In Assembly (NASM, 64-bit) replace the instruction with inc dword [rax]. Click Preview. Check Replacement hex bytes is FF 00, original FF 08, and selection2. Click Apply.",
+          "expected": "Each future shot executes an increment. The editor rejects a replacement exceeding the selected in-place span."
+        },
+        {
+          "title": "Demonstrate and restore",
+          "text": "Resume debugger and Reset room to ammo12. Aim and click Fire once three times: 12 → 13 → 14 → 15. Use Restore original; Resume, then Fire once again.",
+          "expected": "The next restored shot changes15 → 14. Reset room did not restore the patch."
+        },
+        {
+          "title": "Compare replacement lengths safely",
+          "text": "After restoration, preview a one-byte nop in the same 2-byte selection. It is NOP-padded to two bytes. Then preview three nops in that 2-byte span; the longer in-place replacement is rejected. These previews are practice only: return to the original restored state.",
+          "expected": "A shorter replacement is padded to preserve the original span. A longer payload requires Hook mode and a complete larger entry span, taught next."
+        }
+      ],
+      "hints": [
+        "Ensure the memory size is dword. inc byte [rax] changes only the low byte.",
+        "Find writes returns instruction addresses distinct from the ammo data address. Use the confirmed row and its captured RAX."
+      ],
+      "solutions": [
+        "Confirm the 2-byte FF08 writer; replace its NASM with inc dword [rax], Preview FF00, Apply, Resume, Reset room, and Fire once×3.",
+        "Restore original and fire once: ammo15 → 14. Inspect short/long previews without applying those practice changes."
+      ],
+      "restoration": "In the assembly editor use Restore original, or open Patches and use Restore all. Stop any watches, Resume the debugger, and only then return to the game. Reset room resets gameplay data only; it does not restore patched code. Restore code before leaving this room. Restarting the executable creates a fresh unpatched process."
+    },
+    {
+      "id": 9,
+      "title": "Shared Machinery",
+      "objective": "Start: player and enemy have distinct Actor objects but share one damage routine. Identify both accessed health addresses and capture an event filtered to the player.",
+      "concept": "One code address can access many data addresses. Instruction watches capture Before context; completed access attribution follows an executed step. A Condition filters recorded watch events and Pause on match behavior. It never changes which objects a code patch affects.",
+      "steps": [
+        {
+          "title": "Discover shared accesses",
+          "text": "In ReClass, open the process browser, select the process name and PID shown by this game, and click Attach to Process. Open Process → Memory Searcher... (the Scanner window). Keep game simulation paused; the game window and live values remain usable. On the correct data address, choose Find out what writes to this address.... Perform the controlled action once. Select the writer candidate, choose Confirm next execution, then perform that action once more. A data-watch record is After context, so its event RIP can be the following instruction: confirmation supplies the actual executed boundary and Before registers. Choose Inspect / edit on the confirmed instruction. First find and confirm the player health writer with Hit player. Select the confirmed row and Find accessed addresses. Resume and use Hit player then Hit enemy once each.",
+          "expected": "The same sub instruction has two rows/data addresses: player health and enemy health, with counts and captured registers."
+        },
+        {
+          "title": "Follow and classify objects",
+          "text": "For each row choose Follow data or Follow register… → RAX. Because health is offset0, that address is also Actor base. Define its faction uint32 at offset {{actor.faction}}. Compare names and live object addresses.",
+          "expected": "Player faction=1; enemy faction=2. The same RAX-based instruction operates on whichever Actor is passed."
+        },
+        {
+          "title": "Filter and pause on the player",
+          "text": "Stop collection. In the instruction-watch Condition enter mem32(rax + {{actor.faction}}) == 1, enable Pause on match, and Start again. Trigger Hit enemy first, then Hit player.",
+          "expected": "Enemy events do not match; player event suspends the process in Before context. The game window stops responding while the debugger holds the process. Use the offline guide and ReClass Resume."
+        },
+        {
+          "title": "Explain the scope",
+          "text": "Inspect the captured player registers, Stop the watch and Resume. A NOP at this shared writer would prevent damage to both factions even if the watch was filtered to faction1. Use a conditional hook when code must affect only the player. Click Acknowledge player-only event after observing your filtered event.",
+          "expected": "The room records observing both data addresses and a player event. Confirm the observation manually if the game cannot detect your debugger filter."
+        }
+      ],
+      "hints": [
+        "The instruction watch points RAX at Actor health; add28 to inspect faction. For ammo hooks the faction displacement is different because ammo is at4.",
+        "Enter the expression in Condition before Start. The Condition grammar supports mem32(...), register names and ==."
+      ],
+      "solutions": [
+        "Confirm the damage writer, Find accessed addresses, trigger Hit player and Hit enemy, then Follow data and read faction at +{{actor.faction}}: 1 and2.",
+        "Stop; set Condition to mem32(rax + {{actor.faction}}) == 1 and Pause on match; Start; Hit enemy then Hit player. Stop and Resume afterward. No code patch is needed for this room."
+      ],
+      "restoration": "Stop the instruction watch and Resume the process. If you experimented with a code patch, Restore original or Restore all before leaving. Event filtering does not undo or restrict any active patch."
+    },
+    {
+      "id": 10,
+      "title": "Energy Siphon",
+      "objective": "Start: player health50, ammo12; enemy uses the same firing routine. Add five health only on player firing while preserving one round of ammo consumption. Restore afterward.",
+      "concept": "A Hook moves a complete selected instruction span into a trampoline and returns to its continuation. At ammo writer RAX=Actor+{{actor.ammo}}, so Actor=RAX-{{actor.ammo}} and faction is [RAX+{{actor.faction_from_ammo}}]. InsertAfter runs displaced originals first; InsertBefore runs your payload first; ReplaceSelection omits selected originals, so your payload must include the decrement.",
+      "steps": [
+        {
+          "title": "Confirm and select a safe hook span",
+          "text": "In ReClass, open the process browser, select the process name and PID shown by this game, and click Attach to Process. Open Process → Memory Searcher... (the Scanner window). Keep game simulation paused; the game window and live values remain usable. On the correct data address, choose Find out what writes to this address.... Perform the controlled action once. Select the writer candidate, choose Confirm next execution, then perform that action once more. A data-watch record is After context, so its event RIP can be the following instruction: confirmation supplies the actual executed boundary and Before registers. Choose Inspect / edit on the confirmed instruction. Use Fire once at player ammo. The ammo patch site has straight-line NOP padding after dec. Load a complete span containing dec and sufficient following NOPs; use the displayed patch-span size. Do not include ret or branch into the middle of a span.",
+          "expected": "The selected original starts FF08 and contains only dec plus NOPs. Enough span is available for a near or far jump. Reset room after capture to restore health50/ammo12."
+        },
+        {
+          "title": "Insert after: preserve consumption first",
+          "text": "Select Patch mode Hook and Hook semantics InsertAfter (the UI enum label). Paste this exact NASM payload; it contains no dec because the displaced originals run first:\n\npushfq\npush rcx\nlea rcx, [rax - {{actor.ammo}}]\ncmp dword [rcx + {{actor.faction}}], 1\njne .done\nadd dword [rcx + {{actor.health}}], 5\n.done:\npop rcx\npopfq\n\nClick Prepare hook. Inspect entry-jump width, displaced instructions, allocated trampoline address, and the continuation shown in Change preview. The actual displaced entry span can expand beyond Selected bytes for the jump; continuation is patch-site + actual entry-span bytes. Verify original dec occurs exactly once before the payload, then click Apply directly. Do not click Preview after Prepare hook: Preview cancels the prepared reservation.",
+          "expected": "The payload saves/restores flags and RCX, leaves RAX unchanged, and calls no external functions. The dec result flags survive. Preparation reserves memory; it does not apply the entry patch."
+        },
+        {
+          "title": "Exercise player-only healing",
+          "text": "Resume debugger, Reset room, and Fire once for the player: health50 → 55 and ammo12 → 11. Click Enemy fire once and compare enemy/player live fields. Then Fire once twice more for the player.",
+          "expected": "Player health65/ammo9 after three player shots. Enemy firing consumes enemy ammo but heals neither enemy nor player. Watch filters are irrelevant to this conditional hook."
+        },
+        {
+          "title": "Worked Insert before variant",
+          "text": "Restore original before changing semantics. Choose Hook / InsertBefore and paste the same payload above, with no dec. Click Prepare hook and review its Change preview: payload executes first, restored flags feed the displaced dec, then continuation. Apply and repeat one-shot verification after Reset room.",
+          "expected": "The payload heals50 → 55 before the original ammo12 → 11 decrement. Exactly one decrement is still supplied by the relocated original span."
+        },
+        {
+          "title": "Worked Replace selection variant",
+          "text": "Restore original again. Choose Hook / ReplaceSelection. Paste the full replacement below, including the original decrement exactly once:\n\ndec dword [rax]\npushfq\npush rcx\nlea rcx, [rax - {{actor.ammo}}]\ncmp dword [rcx + {{actor.faction}}], 1\njne .done\nadd dword [rcx + {{actor.health}}], 5\n.done:\npop rcx\npopfq\n\nPrepare hook, inspect Change preview displacement and continuation, Apply directly, Resume, Reset room and verify one player shot and one enemy shot.",
+          "expected": "ReplaceSelection emits no selected dec automatically; your explicit dec is required. Player shot produces health55/ammo11; enemy gets no heal."
+        },
+        {
+          "title": "Restore all code",
+          "text": "After the final hooked player/enemy checks, use Restore original or Restore all, Resume, and Fire once without Reset room between these phases.",
+          "expected": "Ammo decreases by1 and the current player health stays unchanged (55 after the final replacement one-shot example, or65 after the first three-shot example). The restoration detector keeps the earlier hooked observations only while this room remains unreset."
+        }
+      ],
+      "hints": [
+        "Do not duplicate dec in InsertBefore or InsertAfter: the hook relocates the original once. In ReplaceSelection, omitting dec stops consumption.",
+        "pushfq/popfq preserve flags modified by cmp/add; push rcx/pop rcx preserve the scratch register. The paired pushes/pops leave RSP unchanged and the payload needs no function calls.",
+        "Stop watches before applying a hook to avoid comparing a pending captured original instruction with changed code. Restore an existing patch before switching modes.",
+        "If you changed code or clicked Preview after preparation, click Prepare hook again and review the new Change preview before Apply. Any code/locator edits invalidate prior preparation."
+      ],
+      "solutions": [
+        "Preferred Hook / InsertAfter payload:\npushfq\npush rcx\nlea rcx, [rax - {{actor.ammo}}]\ncmp dword [rcx + {{actor.faction}}], 1\njne .done\nadd dword [rcx + {{actor.health}}], 5\n.done:\npop rcx\npopfq\nPrepare hook → inspect its Change preview, jump, original span and continuation → Apply directly. Preview would cancel preparation. With restored data, three player shots yield health65/ammo9. Enemy firing only consumes ammo.",
+        "Hook / InsertBefore uses exactly the same payload without dec. Its order is payload, relocated dec/NOPs, continuation. Preserve incoming flags in the payload; dec then sets the normal final arithmetic flags.",
+        "Hook / ReplaceSelection full payload:\ndec dword [rax]\npushfq\npush rcx\nlea rcx, [rax - {{actor.ammo}}]\ncmp dword [rcx + {{actor.faction}}], 1\njne .done\nadd dword [rcx + {{actor.health}}], 5\n.done:\npop rcx\npopfq\nIts order is your explicit dec, conditional heal, continuation. The selected original dec is not emitted automatically. Always Restore original between these variants.",
+        "After any complete variant, verify a player heal and an enemy shot with no heal, then Restore original, Resume and fire the player once without Reset room. Ammo decreases normally while health stays at its current value, preserving the detector’s hook/restore observations."
+      ],
+      "restoration": "In the assembly editor use Restore original, or open Patches and use Restore all. Stop any watches, Resume the debugger, and only then return to the game. Reset room resets gameplay data only; it does not restore patched code. Restore code before leaving this room. Restarting the executable creates a fresh unpatched process."
+    },
+    {
+      "id": 11,
+      "title": "The Decision Room",
+      "objective": "Start: keycard0, clearance0, flags2 (alarm on). Door checks keycard, clearance and alarm in a short deterministic routine. Diagnose why it fails, trace to the marked endpoint, export CSV, then open the door.",
+      "concept": "A branch acts on flags established by a test/compare. Before snapshots describe an instruction before it runs; After snapshots show resulting registers and flags. Tracing the selected thread holds other threads and changes scheduling; limit the trace to this lesson routine.",
+      "steps": [
+        {
+          "title": "Reveal the routine and endpoint",
+          "text": "In ReClass, open the process browser, select the process name and PID shown by this game, and click Attach to Process. Open Process → Memory Searcher... (the Scanner window). Keep game simulation paused; the game window and live values remain usable. Reveal address for the vault entry breakout_vault_entry and marked endpoint breakout_vault_endpoint. Write down the current endpoint absolute address for the stop condition; the address changes after restart. In ReClass choose Debugger → Inspect / edit instructions… and enter the revealed entry code address; use Find accessed addresses to create an instruction watch, set Pause on match, and Start. Resume debugger if needed, then click Evaluate door.",
+          "expected": "The process pauses at the entry in Before context, with RAX normalized to the Actor pointer. The game window freezes until ReClass resumes it. Keep GUIDE.html or GUIDE.md open."
+        },
+        {
+          "title": "Step and diagnose",
+          "text": "Select the captured row, Inspect / edit or view the register details. Use Step into through the keycard test, clearance comparison and alarm-bit test. Observe RIP, RAX, EFLAGS/ZF and each branch. An untaken condition may skip later checks, so correct one field and repeat to see the next.",
+          "expected": "At defaults keycard is missing; clearance must equal2; flags &2 must be0. Read each instruction rather than assuming a failed branch means all checks were run."
+        },
+        {
+          "title": "Trace to the marked endpoint",
+          "text": "Capture a fresh entry event. Choose Trace selected thread. Set instruction limit64 and time limit5000ms. In Stop condition (Before context; optional), enter rip == 0x followed by the currently revealed endpoint in hex, e.g. rip == 0x7FF612341234 (example only). Click Trace.",
+          "expected": "Trace stops before executing breakout_vault_endpoint, which is before ret. The instruction/time bounds prevent tracing unrelated rendering/event handling. Do not use the sample address as a live address."
+        },
+        {
+          "title": "Export and compare phases",
+          "text": "When prompted, save the Trace CSV file. Review address,instruction,thread,before_registers,after_registers. Compare flags before and after a cmp/test and confirm the following branch destination. Use Cancel trace if you started without the endpoint condition. After reviewing the saved CSV, Resume and click Acknowledge CSV export in the game.",
+          "expected": "The CSV documents the executed path and Before/After snapshots. Trace/export completion is a manual acknowledgement because the game cannot verify what you saved."
+        },
+        {
+          "title": "Correct the inputs",
+          "text": "Stop the watch and Resume debugger. Set keycard1, clearance2 and clear only alarm bit1: flags = F & ~2. Preserve other bits. Click Evaluate door. Optionally trace the corrected path to compare it with the failing path.",
+          "expected": "The door result is accepted. This room does not require power bit0; Room4’s door had an additional power condition."
+        }
+      ],
+      "hints": [
+        "For a deterministic trace, pause at the revealed entry before clicking Trace selected thread. ReClass’s debugger pause suspends rendering as well as simulation.",
+        "The trace stop condition is evaluated in Before context. Endpoint must be the current code address and lie before ret."
+      ],
+      "solutions": [
+        "Use a Pause on match instruction watch at breakout_vault_entry; Evaluate door; Step into and inspect ZF and branch destinations. Trace with limit64/5000ms and rip == 0x<current endpoint>. Save trace.csv.",
+        "Resume, write keycard1 at +{{actor.keycard}}, clearance2 at +{{actor.clearance}}, and flagsF &~2 at +{{actor.flags}}, then Evaluate door. Mark trace/export as done manually in the tutorial."
+      ],
+      "restoration": "Stop watches and Resume the debugger. This lesson needs no code edit. If you experimented with patches, use Restore original or Restore all before leaving; Reset room only resets data."
+    },
+    {
+      "id": 12,
+      "title": "Return Visit",
+      "objective": "Reuse the ammo increment patch, save its definition and project, restart the same executable image, resolve and explicitly reapply it, then restore. Repeat using a unique byte-pattern anchor outside the overwritten bytes.",
+      "concept": "ASLR changes module bases and heap addresses. A module-relative code offset survives relocation for the matching image. ModulePattern searches that matching module for a unique anchor and adds an Entry offset. Saved definitions are tied to platform, architecture and executable image hash; loading them does not apply them.",
+      "steps": [
+        {
+          "title": "Save a module-offset definition",
+          "text": "In ReClass, open the process browser, select the process name and PID shown by this game, and click Attach to Process. Open Process → Memory Searcher... (the Scanner window). Keep game simulation paused; the game window and live values remain usable. Confirm the ammo writer as in Room8. InPlace selection2, inc dword [rax], Preview. Give Name: Breakout ammo increment. Set Saved locator ModuleOffset, verify module name, offset = code address - module base and SHA-256. Click Save definition. Then Save Project to BreakoutTutorial.rcnet. Click Preview again after Save definition (saving invalidates the prior preview), then Apply and verify a shot increments.",
+          "expected": "Save definition adds the patch recipe to the current project; Save Project writes it to disk. Neither is the same as applying the patch. A raw SessionAddress does not persist across process restarts."
+        },
+        {
+          "title": "Restart and resolve safely",
+          "text": "Restore original, stop watches, Resume and close the game. Reopen the same packaged executable with --room 12 or select Room12. Attach ReClass to the new PID, reopen BreakoutTutorial.rcnet, open Patches, select the definition and Open editor.",
+          "expected": "The saved patch is inactive. The editor resolves new module base + stored offset, verifies matching image and original bytes, and shows the newly resolved absolute code address. Heap data addresses must be reacquired."
+        },
+        {
+          "title": "Apply and restore in the new process",
+          "text": "Click Preview, inspect the resolved original FF08 and replacement FF00, then Apply explicitly. Reset room to ammo12, then click Acknowledge process restart to acknowledge the guided restart step; three Fire once actions increase it to15. Restore original, Resume, and Fire once again.",
+          "expected": "Ammo goes15 → 14 after restoration. The room observes the increasing phase and subsequent normal decrement in the new process; saving/restarting steps are guided manually."
+        },
+        {
+          "title": "Save a unique pattern definition",
+          "text": "With original ammo code restored, reopen the ammo instruction editor and name a second inc patch Breakout ammo signature. Set Saved locator ModulePattern. Enter Pattern: {{ammo.signature}} and Entry offset: {{ammo.signature_entry_offset}} (signed decimal). This stable anchor is outside the bytes that inc overwrites. Save definition and Save Project.",
+          "expected": "The pattern matches exactly once in the executable module. Its match address + entry offset resolves the ammo writer. An ambiguous/absent pattern must be rejected rather than choosing an arbitrary match."
+        },
+        {
+          "title": "Repeat resolution with the signature",
+          "text": "Close and reopen the same image again, attach to its new PID, load the saved project, select Breakout ammo signature in Patches and Open editor. Verify the module identity, unique anchor, displaced entry offset and original FF08. Preview and Apply, verify increments, then Restore original.",
+          "expected": "A fresh load stays inactive until Apply. The signature remains stable because it excludes overwritten patch bytes. Windows and Linux definitions are separate; changed executable builds may have different hashes and offsets."
+        },
+        {
+          "title": "Keep progress separate from patches",
+          "text": "Use Return to menu and select any room. Progress stores tutorial position, completion and display settings only. Explain that recorded outcomes cannot prove the memory technique used and never persist raw pointers, gameplay memory edits or active code patches.",
+          "expected": "A fresh executable process starts normal code. The offline guide remains usable during any debugger suspension."
+        }
+      ],
+      "hints": [
+        "Use the same executable image, not a newly rebuilt one; image hash and platform checks prevent stale definitions.",
+        "The unique anchor is {{ammo.signature_entry_offset}} bytes before the ammo writer. Do not use FF08 by itself: it can occur many times and it changes when patched.",
+        "Save definition changes the project repository; Save Project persists it. Loading a project never automatically applies saved definitions."
+      ],
+      "solutions": [
+        "ModuleOffset: save confirmed 2-byte inc patch with its module identity and offset, Save Project, restore, close/reopen the same game, reattach, open Patches → Open editor → Preview → Apply. Verify12 → 15, then Restore original and verify15 → 14.",
+        "ModulePattern: restore originals, save Pattern {{ammo.signature}}, Entry offset {{ammo.signature_entry_offset}}, replacement inc dword [rax], then Save Project. Restart/reattach; resolve unique module match + entry offset; Preview and Apply explicitly; verify and restore. Do not transfer definitions between Linux and Windows or different image hashes."
+      ],
+      "restoration": "In the assembly editor use Restore original, or open Patches and use Restore all. Stop any watches, Resume the debugger, and only then return to the game. Reset room resets gameplay data only; it does not restore patched code. Restore code before leaving this room. Restarting the executable creates a fresh unpatched process."
+    }
+  ]
+}

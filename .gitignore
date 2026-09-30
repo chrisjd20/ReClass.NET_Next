@@ -259,6 +259,7 @@ paket-files/
 /NativeCore/build/
 /NativeCore/Unix/build/
 /build/
+/demo/ReClassBreakout/build/
 
 # Local environment and credentials; keep reusable configuration examples.
 .env

@@ -1,0 +1,18 @@
+{
+  "raylib": {
+    "version": "5.5",
+    "source_url": "https://github.com/raysan5/raylib/archive/refs/tags/5.5.tar.gz",
+    "source_sha256": "aea98ecf5bc5c5e0b789a76de0083a21a70457050ea4cc2aec7566935f5e258e",
+    "license": "Licenses/raylib-LICENSE.txt",
+    "license_sha256": "355bdd50936805f62f091da289f7ba467ea0711586a464ad755dcc73dcfb52a8",
+    "bundled_glfw_license": "Licenses/raylib-GLFW-LICENSE.txt",
+    "bundled_glfw_license_sha256": "149704059b5d0bf551637e50042dd4de9c2cae921021f6636298911e3a5f9462",
+    "linkage": "static",
+    "platform": "Desktop GLFW, OpenGL 3.3; X11/XWayland on Linux",
+    "audio": false,
+    "examples": false,
+    "bundled_third_party_notices": "Licenses/raylib-third-party-NOTICES.txt",
+    "bundled_third_party_notices_sha256": "0e4d95323b946f59611a68ed80c487232fba2177399feebda9b25d92cb558f43"
+  },
+  "verification": "SHA-256 measured from the exact official HTTPS 5.5 tag archive downloaded 2026-09-30; CMake verifies it before extraction. License hashes measured from that archive."
+}

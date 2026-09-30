@@ -104,12 +104,19 @@ namespace ReClassNET.Forms
 			reverseButton.Click += async (s, e) => await RunAsync(async () => { await CancelPreparationAsync(); new WatchFinderForm(workspace, Address(), 1, false, true).Show(this); });
 			nopButton.Click += (s, e) => { if (originals == null) return; modeBox.SelectedItem = PatchMode.InPlace; hexBox.Text = AssemblyService.FormatHex(Enumerable.Repeat((byte)0x90, originals.Length).ToArray()); authoritative = PatchSourceKind.Bytes; };
 			workspace.Manager.Changed += ManagerChanged; workspace.Session.StateChanged += SessionChanged;
-			Shown += async (s, e) => await RunAsync(() => LoadSelectionAsync(true));
+			Shown += async (s, e) =>
+			{
+				await Task.Yield();
+				// Mono resets multiline TextBox heights when their native handles are
+				// created. Reapply docking after showing so all code panes stay readable.
+				foreach (var box in new[] { originalBox, assemblyBox, hexBox, previewBox }) box.Parent.PerformLayout();
+				await RunAsync(() => LoadSelectionAsync(true));
+			};
 			FormClosing += EditorClosing; FormClosed += EditorClosed;
 			UpdateButtons();
 		}
 
-		private static TextBox MakeCodeBox(bool readOnly) => new TextBox { Dock = DockStyle.Fill, Multiline = true, ScrollBars = ScrollBars.Both, WordWrap = false, ReadOnly = readOnly, AcceptsTab = !readOnly, MaxLength = 262144, Font = new Font(FontFamily.GenericMonospace, 10) };
+		private static TextBox MakeCodeBox(bool readOnly) => new TextBox { AutoSize = false, Multiline = true, ScrollBars = ScrollBars.Both, WordWrap = false, ReadOnly = readOnly, AcceptsTab = !readOnly, MaxLength = 262144, Font = new Font(FontFamily.GenericMonospace, 10), Dock = DockStyle.Fill };
 		private static Label Caption(string text) => new Label { Text = text, AutoSize = true, Margin = new Padding(4, 8, 4, 0) };
 		private static FlowLayoutPanel Flow() => new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = true, AutoScroll = true };
 		private static GroupBox Group(string text, Control content) { var group = new GroupBox { Text = text, Dock = DockStyle.Fill, Padding = new Padding(6) }; group.Controls.Add(content); return group; }

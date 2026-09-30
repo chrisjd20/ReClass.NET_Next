@@ -21,6 +21,63 @@ EXPORTS = {
 }
 ADVANCED_EXPORTS = {'RcDebugQueryV1', 'RcDebugExecuteV1', 'RcDebugWaitV1'}
 
+def verify_demo(root, platform):
+    demo = root / 'Demo'
+    build = json.loads((root / 'BUILD.json').read_text())['demo']
+    assert build['rooms'] == 12
+    dependencies = json.loads((demo / 'DEPENDENCIES.json').read_text())
+    assert dependencies == build['dependencies']
+    raylib = dependencies['raylib']
+    assert raylib['version'] == '5.5'
+    assert raylib['source_url'] == 'https://github.com/raysan5/raylib/archive/refs/tags/5.5.tar.gz'
+    assert raylib['source_sha256'] == 'aea98ecf5bc5c5e0b789a76de0083a21a70457050ea4cc2aec7566935f5e258e'
+    assert raylib['linkage'] == 'static' and not raylib['audio'] and not raylib['examples']
+    for key in ('license', 'bundled_glfw_license', 'bundled_third_party_notices'):
+        license_path = pathlib.Path(raylib[key])
+        license_bytes = (demo / license_path).read_bytes()
+        assert license_bytes == (root / license_path).read_bytes(), (platform, license_path)
+        assert hashlib.sha256(license_bytes).hexdigest() == raylib[key + '_sha256']
+    target = build['builds'][platform]
+    executable = root / target['executable']
+    assert hashlib.sha256(executable.read_bytes()).hexdigest() == target['sha256'], (platform, 'Demo checksum')
+    for name in ('GUIDE.html', 'GUIDE.md', 'layout.md'):
+        content = (demo / name).read_bytes()
+        assert len(content) > 100, (platform, name)
+        assert hashlib.sha256(content).hexdigest() == target['guides'][name], (platform, name)
+    html = (demo / 'GUIDE.html').read_text()
+    markdown = (demo / 'GUIDE.md').read_text()
+    for room in range(1, 13):
+        assert f'id="room-{room}"' in html, (platform, 'Missing HTML room', room)
+        assert re.search(r'^## ' + str(room) + r'\. ', markdown, re.MULTILINE), (platform, 'Missing Markdown room', room)
+    assert not re.search(r'<(?:script|link|img)\b[^>]*(?:src|href)\s*=\s*[\"\']https?://', html, re.IGNORECASE), 'Offline guide loads remote resources'
+    if platform == 'windows':
+        image = pefile.PE(str(executable))
+        assert image.FILE_HEADER.Machine == 0x8664, 'Windows demo must be x64'
+        assert not image.OPTIONAL_HEADER.DATA_DIRECTORY[14].VirtualAddress, 'Demo must be native'
+        assert image.OPTIONAL_HEADER.DllCharacteristics & 0x40, 'Demo ASLR disabled'
+        imports = {entry.dll.decode().lower() for entry in image.DIRECTORY_ENTRY_IMPORT}
+        allowed = {'kernel32.dll', 'msvcrt.dll', 'user32.dll', 'gdi32.dll', 'opengl32.dll',
+                   'winmm.dll', 'shell32.dll', 'advapi32.dll', 'ole32.dll', 'comdlg32.dll',
+                   'imm32.dll', 'version.dll', 'ntdll.dll'}
+        assert imports <= allowed, ('Unexpected demo runtime DLLs', imports - allowed)
+    else:
+        assert executable.stat().st_mode & 0o111, 'Linux demo is not executable'
+        assert (demo / 'run-demo.sh').stat().st_mode & 0o111, 'Linux demo launcher is not executable'
+        header = subprocess.check_output(['readelf', '-h', str(executable)], text=True)
+        assert 'ELF64' in header and 'Advanced Micro Devices X86-64' in header, 'Linux demo must be x64'
+        assert re.search(r'Type:\s+DYN', header), 'Linux demo must be a relocatable PIE'
+        versions = subprocess.check_output(['readelf', '--version-info', str(executable)], text=True)
+        glibc = [tuple(map(int, value.split('.'))) for value in re.findall(r'\bGLIBC_([0-9.]+)', versions)]
+        assert not glibc or max(glibc) <= (2, 35), ('Demo glibc baseline exceeded', max(glibc))
+        dynamic = subprocess.check_output(['readelf', '-d', str(executable)], text=True)
+        needed = set(re.findall(r'\(NEEDED\).*?\[(.*?)\]', dynamic))
+        allowed = {'libc.so.6', 'libm.so.6', 'libpthread.so.0', 'libdl.so.2', 'libstdc++.so.6',
+                   'libgcc_s.so.1', 'libGL.so.1', 'libGLX.so.0', 'libOpenGL.so.0', 'libX11.so.6',
+                   'libXrandr.so.2', 'libXinerama.so.1', 'libXcursor.so.1', 'libXi.so.6'}
+        assert needed <= allowed, ('Unexpected demo runtime libraries', needed - allowed)
+        resolved = subprocess.check_output(['ldd', str(executable)], text=True)
+        assert 'not found' not in resolved, resolved
+
 def verify(artifacts):
     for line in (artifacts / 'SHA256SUMS').read_text().splitlines():
         digest, name = line.split('  ', 1)
@@ -50,6 +107,7 @@ def verify(artifacts):
             app = pefile.PE(str(root / 'ReClass.NET.exe'))
             assert app.FILE_HEADER.Machine == 0x8664, 'Managed application must target x64'
             assert app.OPTIONAL_HEADER.DATA_DIRECTORY[14].VirtualAddress, 'Missing CLR header'
+            verify_demo(root, platform)
         windows = temp / 'ReClass.NET_Next-windows-x64'
         native = pefile.PE(str(windows / 'NativeCore.dll'))
         assert native.FILE_HEADER.Machine == 0x8664
@@ -95,7 +153,7 @@ def verify(artifacts):
         assert 'not found' not in dependencies, dependencies
         version = subprocess.check_output([assembler, '--version'], text=True)
         assert re.search(r'NASM version 3\.02(?:\s|$)', version), version
-    print('PASS: checksums, package contents, x64 binaries, native exports and dependencies')
+    print('PASS: checksums, package contents, x64 binaries, native exports, demo guides/licenses and dependencies')
 
 if __name__ == '__main__':
     verify(pathlib.Path(sys.argv[1]))

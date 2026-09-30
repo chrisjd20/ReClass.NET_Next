@@ -72,6 +72,21 @@ bash docker/check-compat.sh
 
 Windows packages are cross-compiled and statically inspected on Linux. This does **not** substitute for Windows runtime validation. See the [build validation history](docs/VALIDATION.md) and [focused debugger walkthrough](validation/debugger/README.md). The new debugger uses the two focused checkpoints in its roadmap rather than the historical suite/matrix above.
 
+## Interactive tutorial game
+
+The release archives include **ReClass: Breakout** under `Demo/`: a native
+Windows/Linux x64 game with 12 guided rooms for learning memory scans, structures,
+pointers, writer/access discovery, assembly edits, hooks, conditions, traces and
+saved patches. Values and types are visible, each room starts paused, and
+single-action buttons make experiments repeatable. Hints and current address
+reveals are available without penalty.
+
+Open `Demo/ReClassBreakout.exe` on Windows or `Demo/run-demo.sh` on Linux, then
+attach ReClass to the game PID. Read the [demo guide](docs/DEMO.md) and the packaged
+`Demo/GUIDE.html` for full instructions. The game requires OpenGL 3.3; Linux also
+needs the documented X11/XWayland graphics libraries. The existing Compose build
+exports both the application and game.
+
 ## Existing limitations
 
 Linux retains unrelated upstream gaps: Windows PDB symbol loading and several desktop integrations are unavailable, and global keyboard polling is stubbed. The advanced debugger uses a new all-thread ptrace backend; legacy plugin entry points remain compatible. Automatic hooks reject unsupported instruction layouts, and published hook allocations remain in the target until exit. ARM, macOS, x86 releases, bundled Mono, UI modernization and installers are outside scope.

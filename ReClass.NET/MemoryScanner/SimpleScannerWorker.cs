@@ -22,20 +22,27 @@ namespace ReClassNET.MemoryScanner
 
 		public IList<ScanResult> Search(byte[] data, int count, CancellationToken ct)
 		{
+			return Search(data, count, ct, 0, count);
+		}
+
+		internal IList<ScanResult> Search(byte[] data, int count, CancellationToken ct, int firstIndex, int searchLength)
+		{
 			Contract.Requires(data != null);
 
 			var results = new List<ScanResult>();
 
-			var endIndex = count - comparer.ValueSize;
+			var endIndex = Math.Min(count - comparer.ValueSize, searchLength - 1);
 
-			for (var i = 0; i < endIndex; i += settings.FastScanAlignment)
+			// Include the last complete value. Overlap bytes only complete values whose
+			// start belongs to this chunk. A long counter avoids wrapping on large steps.
+			for (long i = firstIndex; i <= endIndex; i += settings.FastScanAlignment)
 			{
 				if (ct.IsCancellationRequested)
 				{
 					break;
 				}
 
-				if (comparer.Compare(data, i, out var result))
+				if (comparer.Compare(data, (int)i, out var result))
 				{
 					result.Address = (IntPtr)i;
 

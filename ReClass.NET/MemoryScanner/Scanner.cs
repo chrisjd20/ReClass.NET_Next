@@ -20,7 +20,18 @@ namespace ReClassNET.MemoryScanner
 		private class ConsolidatedMemoryRegion
 		{
 			public IntPtr Address { get; set; }
+			public long Size { get; set; }
+		}
+
+		private const int ScanChunkSize = 1024 * 1024;
+		private const int MaximumBufferSize = 0x7FEFFFFF;
+
+		private class ScanChunk
+		{
+			public IntPtr Address { get; set; }
 			public int Size { get; set; }
+			public int SearchLength { get; set; }
+			public int FirstIndex { get; set; }
 		}
 
 		private readonly RemoteProcess process;
@@ -190,83 +201,61 @@ namespace ReClassNET.MemoryScanner
 			Contract.Requires(comparer != null);
 			Contract.Ensures(Contract.Result<Task<bool>>() != null);
 
-			var store = CreateStore();
-
 			var sections = GetSearchableSections();
 			if (sections.Count == 0)
 			{
 				return Task.FromResult(true);
 			}
 
-			var regions = ConsolidateSections(sections);
-
-			var initialBufferSize = (int)(regions.Average(s => s.Size) + 1);
-
+			var regions = ConsolidateSections(sections)
+				.Select(region => ClipRegion(region, Settings))
+				.Where(region => region.Size > 0)
+				.ToList();
+			ValidateChunkedScan(regions, comparer, Settings);
+			var totalSize = regions.Sum(region => region.Size);
+			var store = CreateStore();
 			progress?.Report(0);
-
-			var counter = 0;
-			var totalSectionCount = (float)regions.Count;
+			long counter = 0;
 
 			return Task.Run(() =>
 			{
-				// Algorithm:
-				// 1. Partition the sections for the worker threads.
-				// 2. Create a ScannerContext per worker thread.
-				// 3. n Worker -> m Sections: Read data, search results, store results
-
 				var result = Parallel.ForEach(
-					regions, // Sections get grouped by the framework to balance the workers.
-					() => new ScannerContext(CreateWorker(Settings, comparer), initialBufferSize), // Create a new context for every worker (thread).
-					(s, state, _, context) =>
+					regions,
+					() => new ScannerContext(CreateWorker(Settings, comparer), 0),
+					(region, state, _, context) =>
 					{
-						if (!ct.IsCancellationRequested)
+						foreach (var chunk in CreateScanChunks(region, comparer, Settings))
 						{
-							var start = s.Address;
-							var end = s.Address + s.Size;
-							var size = s.Size;
-
-							if (Settings.StartAddress.IsInRange(start, end))
+							if (ct.IsCancellationRequested)
 							{
-								size -= Settings.StartAddress.Sub(start).ToInt32();
-								start = Settings.StartAddress;
+								state.Stop();
+								break;
 							}
-							if (Settings.StopAddress.IsInRange(start, end))
-							{
-								size -= end.Sub(Settings.StopAddress).ToInt32();
-							}
-
-							context.EnsureBufferSize(size);
+							context.EnsureBufferSize(chunk.Size);
 							var buffer = context.Buffer;
-							if (process.ReadRemoteMemoryIntoBuffer(start, ref buffer, 0, size)) // Fill the buffer.
+							if (process.ReadRemoteMemoryIntoBuffer(chunk.Address, ref buffer, 0, chunk.Size))
 							{
-								var results = context.Worker.Search(buffer, size, ct) // Search for results.
-									.OrderBy(r => r.Address, IntPtrComparer.Instance)
-									.ToList();
+								var matches = context.Worker is SimpleScannerWorker simpleWorker
+									? simpleWorker.Search(buffer, chunk.Size, ct, chunk.FirstIndex, chunk.SearchLength)
+									: context.Worker.Search(buffer, chunk.Size, ct);
+								var results = matches.OrderBy(r => r.Address, IntPtrComparer.Instance).ToList();
 								if (results.Count > 0)
 								{
-									var block = CreateResultBlock(results, start);
-									store.AddBlock(block); // Store the result block.
+									store.AddBlock(CreateResultBlock(results, chunk.Address));
 								}
 							}
-
-							progress?.Report((int)(Interlocked.Increment(ref counter) / totalSectionCount * 100));
+							progress?.Report((int)(Interlocked.Add(ref counter, chunk.SearchLength) / (double)totalSize * 100));
 						}
-						else
-						{
-							state.Stop();
-						}
+						if (ct.IsCancellationRequested) state.Stop();
 						return context;
 					},
-					w => { }
+					context => { }
 				);
 
 				store.Finish();
-
 				var previousStore = stores.Enqueue(store);
 				previousStore?.Dispose();
-
 				isFirstScan = false;
-
 				return result.IsCompleted;
 			}, ct);
 		}
@@ -304,7 +293,7 @@ namespace ReClassNET.MemoryScanner
 							var buffer = context.Buffer;
 							if (process.ReadRemoteMemoryIntoBuffer(b.Start, ref buffer, 0, b.Size))
 							{
-								var results = context.Worker.Search(buffer, buffer.Length, b.Results, ct)
+								var results = context.Worker.Search(buffer, b.Size, b.Results, ct)
 									.OrderBy(r => r.Address, IntPtrComparer.Instance)
 									.ToList();
 								if (results.Count > 0)
@@ -346,28 +335,82 @@ namespace ReClassNET.MemoryScanner
 			if (sections.Count > 0)
 			{
 				var address = sections[0].Start;
-				long size = sections[0].Size.ToInt64();
+				long size = sections[0].Size.ToInt64Bits();
 
 				for (var i = 1; i < sections.Count; ++i)
 				{
 					var section = sections[i];
-					if (address.ToInt64() + size != section.Start.ToInt64())
+					if (checked(address.ToInt64Bits() + size) != section.Start.ToInt64Bits())
 					{
-						regions.Add(new ConsolidatedMemoryRegion { Address = address, Size = (int)size });
+						regions.Add(new ConsolidatedMemoryRegion { Address = address, Size = size });
 
 						address = section.Start;
-						size = section.Size.ToInt64();
+						size = section.Size.ToInt64Bits();
 					}
 					else
 					{
-						size += section.Size.ToInt64();
+						size = checked(size + section.Size.ToInt64Bits());
 					}
 				}
 
-				regions.Add(new ConsolidatedMemoryRegion { Address = address, Size = (int)size });
+				regions.Add(new ConsolidatedMemoryRegion { Address = address, Size = size });
 			}
 
 			return regions;
+		}
+
+		private static ConsolidatedMemoryRegion ClipRegion(ConsolidatedMemoryRegion region, ScanSettings settings)
+		{
+			var start = Math.Max(region.Address.ToInt64Bits(), settings.StartAddress.ToInt64Bits());
+			// Preserve the existing exclusive stop-address behavior.
+			var end = Math.Min(checked(region.Address.ToInt64Bits() + region.Size), settings.StopAddress.ToInt64Bits());
+			return new ConsolidatedMemoryRegion { Address = IntPtrExtension.From(start), Size = Math.Max(0, end - start) };
+		}
+
+		private static void ValidateChunkedScan(IEnumerable<ConsolidatedMemoryRegion> regions, IScanComparer comparer, ScanSettings settings)
+		{
+			if (comparer is ISimpleScanComparer simpleComparer)
+			{
+				if (simpleComparer.ValueSize <= 0 || simpleComparer.ValueSize > MaximumBufferSize)
+				{
+					throw new ArgumentOutOfRangeException(nameof(comparer), "The search value must fit in a scan buffer and contain at least one byte.");
+				}
+				if (settings.FastScanAlignment <= 0)
+				{
+					throw new ArgumentOutOfRangeException(nameof(settings.FastScanAlignment), "Scan alignment must be positive.");
+				}
+			}
+			else if (regions.Any(region => region.Size > MaximumBufferSize))
+			{
+				// Regex/custom complex comparers have no bounded match length. Splitting them
+				// could change anchors, lookarounds and matches spanning read boundaries.
+				throw new NotSupportedException("Regex and custom complex scans require a contiguous buffer smaller than 2 GiB. Narrow the scan address range or use a fixed string/byte-pattern scan.");
+			}
+		}
+
+		private static IEnumerable<ScanChunk> CreateScanChunks(ConsolidatedMemoryRegion region, IScanComparer comparer, ScanSettings settings)
+		{
+			if (!(comparer is ISimpleScanComparer simpleComparer))
+			{
+				yield return new ScanChunk { Address = region.Address, Size = checked((int)region.Size), SearchLength = checked((int)region.Size) };
+				yield break;
+			}
+
+			var overlap = simpleComparer.ValueSize - 1;
+			var chunkSize = Math.Min(ScanChunkSize, MaximumBufferSize - overlap);
+			for (long offset = 0; offset < region.Size;)
+			{
+				var length = (int)Math.Min(chunkSize, region.Size - offset);
+				yield return new ScanChunk
+				{
+					Address = IntPtrExtension.From(checked(region.Address.ToInt64Bits() + offset)),
+					Size = (int)Math.Min((long)length + overlap, region.Size - offset),
+					SearchLength = length,
+					// Keep the same alignment origin as a single read of the clipped region.
+					FirstIndex = (int)((settings.FastScanAlignment - offset % settings.FastScanAlignment) % settings.FastScanAlignment)
+				};
+				offset += length;
+			}
 		}
 
 		/// <summary>

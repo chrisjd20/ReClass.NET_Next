@@ -37,12 +37,22 @@ RUN cmake -S NativeCore -B /out/linux -DCMAKE_BUILD_TYPE=Release \
     && x86_64-w64-mingw32-g++-posix --version > /out/mingw-version.txt \
     && dpkg-query -W > /out/native-packages.txt
 
+# Changes to the demo reuse the compiled native core and pinned assembler layer.
+FROM native AS demo
+RUN apt-get update && apt-get install -y --no-install-recommends libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev \
+    && rm -rf /var/lib/apt/lists/*
+COPY Dependencies/demo-dependencies.json Dependencies/demo-dependencies.json
+COPY demo/ReClassBreakout demo/ReClassBreakout
+COPY docker/build-demo.sh docker/build-demo.sh
+RUN bash docker/build-demo.sh \
+    && dpkg-query -W > /out/native-packages.txt
+
 FROM ubuntu:22.04@sha256:b8b6ee6aa931ecd9d0d952abc34dc0e5f7c6a30c6bb71b079fe399fde0329c02 AS packages
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pefile binutils zip ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pefile binutils zip ca-certificates libx11-6 libxrandr2 libxinerama1 libxcursor1 libxi6 libgl1 libgl1-mesa-dri \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=managed /out /managed
-COPY --from=native /out /native
+COPY --from=demo /out /native
 COPY Dependencies /dependencies
 COPY LICENSE SOURCE.json /metadata/
 COPY docs/DEBUGGER.md /metadata/DEBUGGER.md
@@ -53,6 +63,25 @@ RUN python3 /scripts/package.py "$SOURCE_REVISION" \
 
 FROM packages AS export
 ENTRYPOINT ["/bin/bash", "/scripts/export.sh"]
+
+# Opt-in packaged game acceptance environment. Selecting it runs no checks.
+FROM managed AS breakout-focused
+RUN msbuild validation/breakout/RuntimeWalkthrough.csproj /p:Configuration=Release /p:AppOutputPath=/out/app /p:OutputPath=/out/validation/breakout/ /verbosity:minimal
+
+FROM ubuntu:22.04@sha256:b8b6ee6aa931ecd9d0d952abc34dc0e5f7c6a30c6bb71b079fe399fde0329c02 AS breakout-runtime
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends mono-devel libgdiplus xvfb xauth xdotool x11-utils fonts-liberation python3 python3-pil gcc libc6-dev libx11-6 libxrandr2 libxinerama1 libxcursor1 libxi6 libgl1 libgl1-mesa-dri \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=packages /artifacts /artifacts
+COPY --from=breakout-focused /out/validation/breakout /validation/breakout
+COPY --from=managed /out/app /validation/breakout
+COPY --from=native /out/linux/out/NativeCore.so /validation/breakout/NativeCore.so
+COPY --from=native /out/nasm/linux/nasm /validation/breakout/Tools/nasm
+COPY Dependencies/ColorCode.dll Dependencies/Dia2Lib.dll Dependencies/Microsoft.ExceptionMessageBox.dll Dependencies/Iced.dll /validation/breakout/
+COPY validation/breakout/launcher.c /validation/breakout/launcher.c
+RUN gcc -std=gnu11 -O2 /validation/breakout/launcher.c -o /validation/breakout/breakout-launcher
+WORKDIR /validation/breakout
+ENTRYPOINT ["/bin/bash"]
 
 # Native Linux walkthrough/desktop acceptance environment; no automatic test run.
 FROM ubuntu:22.04@sha256:b8b6ee6aa931ecd9d0d952abc34dc0e5f7c6a30c6bb71b079fe399fde0329c02 AS debugger-runtime

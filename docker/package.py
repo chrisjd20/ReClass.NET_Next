@@ -13,6 +13,20 @@ source = json.loads(pathlib.Path('/metadata/SOURCE.json').read_text())
 assembly_dependencies = json.loads(pathlib.Path('/dependencies/assembly-dependencies.json').read_text())
 assert hashlib.sha256(pathlib.Path('/dependencies/Iced.dll').read_bytes()).hexdigest() == assembly_dependencies['iced']['dll_sha256']
 assembly_dependencies['nasm'] = json.loads(pathlib.Path('/native/nasm/build.json').read_text())
+demo_dependencies = json.loads(pathlib.Path('/dependencies/demo-dependencies.json').read_text())
+for key in ('license', 'bundled_glfw_license', 'bundled_third_party_notices'):
+    assert hashlib.sha256((pathlib.Path('/dependencies') / demo_dependencies['raylib'][key]).read_bytes()).hexdigest() == demo_dependencies['raylib'][key + '_sha256']
+demo_builds = {}
+for platform, executable in [('windows', 'ReClassBreakout.exe'), ('linux', 'ReClassBreakout')]:
+    demo_output = pathlib.Path('/native/demo') / platform
+    demo_builds[platform] = {
+        'executable': 'Demo/' + executable,
+        'sha256': hashlib.sha256((demo_output / 'out' / executable).read_bytes()).hexdigest(),
+        'guides': {
+            name: hashlib.sha256((demo_output / 'generated' / name).read_bytes()).hexdigest()
+            for name in ('GUIDE.html', 'GUIDE.md', 'layout.md')
+        },
+    }
 manifest = {
     'source': source,
     'repository_revision': sys.argv[1],
@@ -20,6 +34,16 @@ manifest = {
     'built_at_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
     'architectures': ['x86_64'],
     'assembly_dependencies': assembly_dependencies,
+    'demo': {
+        'name': 'ReClass: Breakout',
+        'rooms': 12,
+        'dependencies': demo_dependencies,
+        'builds': demo_builds,
+        'runtime_requirements': {
+            'windows': 'Windows x64, OpenGL 3.3 graphics driver; compiler runtimes linked statically',
+            'linux': 'x86_64 glibc >= 2.35, libstdc++ from GCC 11 or newer, OpenGL 3.3, X11/XWayland',
+        },
+    },
     'tools': {
         'mono': pathlib.Path('/managed/mono-version.txt').read_text(),
         'msbuild': pathlib.Path('/managed/msbuild-version.txt').read_text(),
@@ -46,6 +70,22 @@ for platform, native_name in [('windows', 'NativeCore.dll'), ('linux', 'NativeCo
     shutil.copy('/dependencies/Iced.dll', root / 'Iced.dll')
     shutil.copytree('/dependencies/Licenses', root / 'Licenses')
     (root / 'ASSEMBLY-DEPENDENCIES.json').write_text(json.dumps(assembly_dependencies, indent=2) + '\n')
+    demo = root / 'Demo'
+    demo.mkdir()
+    executable = 'ReClassBreakout.exe' if platform == 'windows' else 'ReClassBreakout'
+    demo_output = pathlib.Path('/native/demo') / platform
+    shutil.copy(demo_output / 'out' / executable, demo / executable)
+    (demo / executable).chmod(0o755 if platform == 'linux' else 0o644)
+    for guide in ('GUIDE.html', 'GUIDE.md', 'layout.md'):
+        shutil.copy(demo_output / 'generated' / guide, demo / guide)
+    (demo / 'DEPENDENCIES.json').write_text(json.dumps(demo_dependencies, indent=2) + '\n')
+    (demo / 'Licenses').mkdir()
+    for key in ('license', 'bundled_glfw_license', 'bundled_third_party_notices'):
+        license_name = pathlib.Path(demo_dependencies['raylib'][key])
+        shutil.copy(pathlib.Path('/dependencies') / license_name, demo / license_name)
+    if platform == 'linux':
+        shutil.copy('/scripts/run-demo.sh', demo / 'run-demo.sh')
+        (demo / 'run-demo.sh').chmod(0o755)
     (root / 'Tools').mkdir()
     assembler = 'nasm.exe' if platform == 'windows' else 'nasm'
     shutil.copy('/native/nasm/' + platform + '/' + assembler, root / 'Tools' / assembler)

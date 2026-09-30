@@ -20,3 +20,17 @@ Read DEBUGGER.md for the workflow, conditions, trace and recovery instructions.
 BUILD.json records the imported source commit, working-tree hash and toolchains.
 Windows runtime validation is separate from Linux cross-compilation; consult the
 repository's validation notes for the tested platforms and manual test steps.
+
+ReClass: Breakout is the bundled 12-room memory editing tutorial. Launch
+Demo\ReClassBreakout.exe, then attach ReClass to the process/PID shown in the
+game. Open Demo\GUIDE.html in your browser for the offline guide, or read
+Demo\GUIDE.md and Demo\layout.md. The guide remains usable when the debugger
+suspends the whole game process. Use --room N to start directly in a room;
+--self-check runs the bounded lesson sanity batch without opening a window.
+
+The game uses statically built raylib 5.5 with GLFW, requires an OpenGL 3.3
+graphics driver, and bundles its compiler runtimes statically. It needs no
+raylib DLL or compiler installation. Simulation starts paused. Reset room
+resets gameplay data; restore external patches through ReClass before leaving
+patching rooms. Demo\DEPENDENCIES.json and Demo\Licenses contain the dependency
+pin, checksum, license and bundled third-party notices.
