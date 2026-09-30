@@ -22,3 +22,10 @@ artifacts
 **/*.user
 **/*.suo
 ReClass.NET/Resources/BuildDate.txt
+**/*.o
+**/*.a
+**/CMakeCache.txt
+**/CMakeFiles
+**/.DS_Store
+**/Thumbs.db
+**/Desktop.ini

@@ -1,6 +1,6 @@
 # Debugger, assembly editor, and reversible patching roadmap
 
-Status: implementation specification; features described as new work are not implemented.
+Status: implemented for Windows x64 and native Linux x64 under a subsequent implementation instruction. The original audited specification remains below; see the [usage guide](../docs/DEBUGGER.md) and [two-checkpoint validation record](../docs/DEBUGGER_VALIDATION.md) for current behavior, package identities and the precise limits of runtime/UI evidence.
 
 Audit date: 2026-09-29. Audited repository revision: `38584a4fbb25bfdf57f914c07452ba04a5bcdae7`.
 
@@ -639,17 +639,17 @@ The following primary sources informed dependency and platform decisions. The lo
 
 Before considering future implementation complete, verify these outcomes against the two consolidated checkpoints; this is a deliverable checklist, not a request for additional test runs:
 
-- [ ] Find-write/find-access integrates with existing scanner results and nodes.
-- [ ] The inspector shows instruction/data addresses, bytes, module offsets, counts, registers, snapshot phase, and honest attribution.
-- [ ] Assembly/hex conversion is offline, origin-aware, editable, and explicit about errors and size.
-- [ ] Same-size/shorter edits, NOPs, original restoration, conflicts, and failed-write recovery use one transaction model.
-- [ ] Longer replacements use previewed hooks with correct displaced-instruction handling and defined allocation lifetime.
-- [ ] Reverse access discovery and register/operand navigation work for the stated supported operands.
-- [ ] Conditions, pause/resume, stepping, and bounded tracing have working stop/cleanup behavior.
-- [ ] Definitions save/load inactive and resolve through checked module/pattern identities.
-- [ ] Existing plugins remain loadable; advanced capabilities are optional/versioned.
-- [ ] Windows functionality and native Linux parity are implemented; unavailable runtime checks are named explicitly.
-- [ ] Docker exports include the pinned assembler, instruction library, licenses, and manifest data.
-- [ ] Validation remained within section 13, with any necessary extra check tied to a concrete failure/change.
+- [x] Find-write/find-access integrates with existing scanner results and nodes.
+- [x] The inspector shows instruction/data addresses, bytes, module offsets, counts, registers, snapshot phase, and honest attribution.
+- [x] Assembly/hex conversion is offline, origin-aware, editable, and explicit about errors and size.
+- [x] Same-size/shorter edits, NOPs, original restoration, conflicts, and failed-write recovery use one transaction model.
+- [x] Longer replacements use previewed hooks with correct displaced-instruction handling and defined allocation lifetime.
+- [x] Reverse access discovery and register/operand navigation work for the stated supported operands.
+- [x] Conditions, pause/resume, stepping, and bounded tracing have working stop/cleanup behavior.
+- [x] Definitions save/load inactive and resolve through checked module/pattern identities.
+- [x] Existing plugins remain loadable; advanced capabilities are optional/versioned.
+- [x] Windows functionality and native Linux parity are implemented; unavailable runtime checks are named explicitly.
+- [x] Docker exports include the pinned assembler, instruction library, licenses, and manifest data.
+- [x] Validation remained within section 13, with any necessary extra check tied to a concrete failure/change.
 
 An AI assigned only to produce or revise this document must stop after document review and report its path. An AI later assigned to implement the features should start at M1, preserve these decisions, and report material conflicts with the audited assumptions rather than silently reducing the feature scope.

@@ -38,6 +38,15 @@ namespace ReClassNET.Memory
 
 		private ProcessInfo process;
 		private IntPtr handle;
+		private DebugWorkspace advancedWorkspace;
+		public Guid SessionIdentity { get; private set; }
+		public DebugWorkspace ExistingDebugWorkspace => advancedWorkspace;
+		public DebugWorkspace DebugWorkspace => advancedWorkspace ?? (advancedWorkspace = new DebugWorkspace(this, Program.MainForm.CurrentProject));
+		internal void CloseDebugWorkspace()
+		{
+			advancedWorkspace?.Dispose();
+			advancedWorkspace = null;
+		}
 
 		/// <summary>Event which gets invoked when a process was opened.</summary>
 		public event RemoteProcessEvent ProcessAttached;
@@ -92,6 +101,7 @@ namespace ReClassNET.Memory
 			Contract.Requires(coreFunctions != null);
 
 			this.coreFunctions = coreFunctions;
+			coreFunctions.ProviderChanging += Close;
 
 			debugger = new RemoteDebugger(this);
 		}
@@ -118,6 +128,8 @@ namespace ReClassNET.Memory
 					process = info;
 
 					handle = coreFunctions.OpenRemoteProcess(process.Id, ProcessAccess.Full);
+					if (handle == IntPtr.Zero) { process = null; throw new InvalidOperationException("Could not open the selected process."); }
+					SessionIdentity = Guid.NewGuid();
 				}
 
 				ProcessAttached?.Invoke(this);
@@ -147,6 +159,10 @@ namespace ReClassNET.Memory
 		}
 
 		#region ReadMemory
+		internal bool ReadExactForDebugger(ulong address, byte[] buffer)
+		{
+			return process != null && coreFunctions.ReadRemoteMemory(handle, new IntPtr(unchecked((long)address)), ref buffer, 0, buffer.Length);
+		}
 
 		public bool ReadRemoteMemoryIntoBuffer(IntPtr address, ref byte[] buffer)
 		{
@@ -429,6 +445,14 @@ namespace ReClassNET.Memory
 			UpdateProcessInformationsAsync().Wait();
 		}
 
+		internal void InvalidateModuleInstance(ulong address)
+		{
+			lock (modules)
+			{
+				foreach (var module in modules.Where(m => unchecked((ulong)m.Start.ToInt64()) == address)) module.InstanceId = Guid.NewGuid();
+			}
+		}
+
 		/// <summary>Updates the process informations asynchronous.</summary>
 		/// <returns>The Task.</returns>
 		public Task UpdateProcessInformationsAsync()
@@ -460,6 +484,11 @@ namespace ReClassNET.Memory
 
 				lock (modules)
 				{
+					foreach (var module in newModules)
+					{
+						var previous = modules.FirstOrDefault(m => m.Start == module.Start && m.Size == module.Size && m.Path == module.Path);
+						if (previous != null) module.InstanceId = previous.InstanceId;
+					}
 					modules.Clear();
 					modules.AddRange(newModules);
 				}

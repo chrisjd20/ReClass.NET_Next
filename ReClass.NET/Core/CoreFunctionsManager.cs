@@ -21,6 +21,7 @@ namespace ReClassNET.Core
 		public IEnumerable<string> FunctionProviders => functionsRegistry.Keys;
 
 		public ICoreProcessFunctions CurrentFunctions => currentFunctions;
+		public event Action ProviderChanging;
 
 		public string CurrentFunctionsProvider => functionsRegistry
 			.Where(kv => kv.Value == currentFunctions)
@@ -60,6 +61,7 @@ namespace ReClassNET.Core
 				throw new ArgumentException();
 			}
 
+			if (currentFunctions != functions) ProviderChanging?.Invoke();
 			currentFunctions = functions;
 		}
 

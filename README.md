@@ -2,6 +2,8 @@
 
 ReClass.NET with container builds that export **Windows x64** and **Linux x64** desktop packages. The frontend remains .NET Framework 4.7.2/WinForms; Linux runs it with Mono.
 
+The debugger and instruction editor support write/access discovery, offline NASM assembly/hex editing, reversible in-place patches and longer hooks, saved definitions, operand/register navigation, conditions, and bounded tracing. See the [workflow guide](docs/DEBUGGER.md) and [implementation roadmap](planning/debugger-assembly-patching-roadmap.md). Runtime acceptance is recorded separately from source implementation.
+
 The starting source is the modified local checkout of [chrisjd20/ReClass.NET](https://github.com/chrisjd20/ReClass.NET), commit `a99973f33680efa4c0fb933da3f7750a49c91009`. The original upstream is [ReClassNET/ReClass.NET](https://github.com/ReClassNET/ReClass.NET). See [SOURCE.json](SOURCE.json), the [original README and credits](docs/UPSTREAM_README.md), and [MIT license](LICENSE).
 
 ## Build and export
@@ -24,7 +26,7 @@ native-build-packages.txt
 SHA256SUMS
 ```
 
-Archives include the application, matching native library, managed dependency DLLs, an empty `Plugins` directory, license and runtime instructions. Windows also includes its existing x64 symbol-server DLL. Compiler runtimes are statically linked into the Windows native core; it needs no separate MinGW or Visual C++ runtime.
+Archives include the application, matching native library, managed dependency DLLs, the pinned offline NASM assembler, dependency hashes/licenses, an empty `Plugins` directory, license and runtime instructions. Windows also includes its existing x64 symbol-server DLL. Compiler runtimes are statically linked into the Windows native core; it needs no separate MinGW or Visual C++ runtime.
 
 By default exports are owned by UID/GID 1000. On Linux, use your account's IDs and optionally record the current repository revision:
 
@@ -68,8 +70,8 @@ bash docker/check-compat.sh
 
 `check-compat.sh` installs runtime prerequisites in pinned Ubuntu 22.04/24.04, Debian 12/13 and Fedora 43/44 containers, then exercises the **same exported Linux archive**. It requires an existing successful export. GUI tests use a virtual X11 display; native desktop appearance and Wayland integration still need manual review.
 
-Windows packages are cross-compiled and statically inspected on Linux. This does **not** substitute for Windows runtime validation. See [validation results and manual checks](docs/VALIDATION.md).
+Windows packages are cross-compiled and statically inspected on Linux. This does **not** substitute for Windows runtime validation. See the [build validation history](docs/VALIDATION.md) and [focused debugger walkthrough](validation/debugger/README.md). The new debugger uses the two focused checkpoints in its roadmap rather than the historical suite/matrix above.
 
 ## Existing limitations
 
-Linux retains the upstream gaps: Windows PDB symbol loading and several desktop integrations are unavailable, global keyboard polling is stubbed, and debugger thread handling is incomplete. This work packages existing capabilities rather than adding feature parity. ARM, macOS, x86 releases, bundled Mono, UI modernization and installers are outside this build's scope.
+Linux retains unrelated upstream gaps: Windows PDB symbol loading and several desktop integrations are unavailable, and global keyboard polling is stubbed. The advanced debugger uses a new all-thread ptrace backend; legacy plugin entry points remain compatible. Automatic hooks reject unsupported instruction layouts, and published hook allocations remain in the target until exit. ARM, macOS, x86 releases, bundled Mono, UI modernization and installers are outside scope.

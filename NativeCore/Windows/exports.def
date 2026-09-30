@@ -17,3 +17,6 @@ EXPORTS
 	InitializeInput
 	GetPressedKeys
 	ReleaseInput
+	RcDebugQueryV1
+	RcDebugExecuteV1
+	RcDebugWaitV1

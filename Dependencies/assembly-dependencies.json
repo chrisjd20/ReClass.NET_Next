@@ -1,0 +1,18 @@
+{
+  "iced": {
+    "version": "1.21.0",
+    "package_url": "https://api.nuget.org/v3-flatcontainer/iced/1.21.0/iced.1.21.0.nupkg",
+    "package_sha256": "d31613617e3ddf91239bbc94a8c587849b4236e8f8a2a2ba59ea2397a1487c7a",
+    "framework": "net45",
+    "dll_sha256": "cc915d1c2e7be60933c5b129842ca3d08d1fe3cda6c6d6ade8824dcdde16191f",
+    "license": "Licenses/Iced-LICENSE.txt"
+  },
+  "nasm": {
+    "version": "3.02",
+    "source_url": "https://www.nasm.us/pub/nasm/releasebuilds/3.02/nasm-3.02.tar.xz",
+    "source_sha256": "87336eba53b4acfe917424ab5d500d2b0054d9f5148d35c2273ccf2cfb712f0d",
+    "license": "Licenses/NASM-LICENSE.txt",
+    "bundled_zlib_license": "Licenses/NASM-zlib-LICENSE.txt"
+  },
+  "verification": "SHA-256 measured from the exact official HTTPS artifacts downloaded 2026-09-29; no publisher checksum file was available."
+}

@@ -84,6 +84,7 @@ namespace ReClassNET.Forms
 
 			if (currentProject != null)
 			{
+				Program.RemoteProcess.ExistingDebugWorkspace?.SetProject(newProject);
 				ClassNode.ClassCreated -= currentProject.AddClass;
 			}
 

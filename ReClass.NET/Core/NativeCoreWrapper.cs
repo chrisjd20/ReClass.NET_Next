@@ -6,7 +6,7 @@ using ReClassNET.Native;
 
 namespace ReClassNET.Core
 {
-	public class NativeCoreWrapper : ICoreProcessFunctions
+	public partial class NativeCoreWrapper : ICoreProcessFunctions
 	{
 		#region Native Delegates
 
@@ -78,6 +78,7 @@ namespace ReClassNET.Core
 			awaitDebugEventDelegate = GetFunctionDelegate<AwaitDebugEventDelegate>(handle, "AwaitDebugEvent");
 			handleDebugEventDelegate = GetFunctionDelegate<HandleDebugEventDelegate>(handle, "HandleDebugEvent");
 			setHardwareBreakpointDelegate = GetFunctionDelegate<SetHardwareBreakpointDelegate>(handle, "SetHardwareBreakpoint");
+			LoadAdvanced(handle);
 		}
 
 		protected static TDelegate GetFunctionDelegate<TDelegate>(IntPtr handle, string function)

@@ -63,6 +63,11 @@ namespace ReClassNET.Debugger
 
 		public void FindCodeByBreakpoint(IntPtr address, int size, HardwareBreakpointTrigger trigger)
 		{
+			if (process.ExistingDebugWorkspace != null)
+			{
+				new WatchFinderForm(process.DebugWorkspace, unchecked((ulong)address.ToInt64()), size, trigger == HardwareBreakpointTrigger.Write).Show();
+				return;
+			}
 			var register = GetUsableDebugRegister();
 			if (register == HardwareBreakpointRegister.InvalidRegister)
 			{

@@ -1,4 +1,16 @@
 services:
+  debugger-validation:
+    platform: linux/amd64
+    profiles: [debugger-validation]
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: debugger-validation-export
+    environment:
+      HOST_UID: ${HOST_UID:-1000}
+      HOST_GID: ${HOST_GID:-1000}
+    volumes:
+      - ./dist:/dist
   build:
     platform: linux/amd64
     build:

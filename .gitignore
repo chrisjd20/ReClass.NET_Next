@@ -272,6 +272,15 @@ paket-files/
 __pycache__/
 *.py[cod]
 
+# Native compiler/CMake intermediates and operating-system metadata.
+*.o
+*.a
+CMakeCache.txt
+CMakeFiles/
+.DS_Store
+Thumbs.db
+Desktop.ini
+
 !Dependencies/x64/
 !Dependencies/x64/*.dll
 !Dependencies/x86/

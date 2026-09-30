@@ -75,6 +75,7 @@ namespace ReClassNET.Forms
 			Contract.Ensures(currentProject != null);
 
 			InitializeComponent();
+			InstallAdvancedDebuggerMenu();
 			UpdateWindowTitle();
 
 			mainMenuStrip.Renderer = new CustomToolStripProfessionalRenderer(true, true);
@@ -148,6 +149,8 @@ namespace ReClassNET.Forms
 
 		private async void MainForm_FormClosing(object sender, FormClosingEventArgs e)
 		{
+			try { Program.RemoteProcess.CloseDebugWorkspace(); }
+			catch (Exception error) { e.Cancel = true; MessageBox.Show(error.Message, "Close cancelled: restore owned code first"); return; }
 			// Stop the update timer
 			processUpdateTimer.Stop();
 
@@ -282,7 +285,7 @@ namespace ReClassNET.Forms
 
 		private void saveToolStripMenuItem_Click(object sender, EventArgs e)
 		{
-			if (!currentProject.Classes.Any())
+			if (!currentProject.Classes.Any() && currentProject.CustomData.GetString(ReClassNET.Patching.PatchRepository.CustomDataKey) == null)
 			{
 				return;
 			}
@@ -296,11 +299,12 @@ namespace ReClassNET.Forms
 
 			var file = new ReClassNetFile(currentProject);
 			file.Save(currentProject.Path, Program.Logger);
+			currentProject.MarkSaved();
 		}
 
 		private void saveAsToolStripMenuItem_Click(object sender, EventArgs e)
 		{
-			if (!currentProject.Classes.Any())
+			if (!currentProject.Classes.Any() && currentProject.CustomData.GetString(ReClassNET.Patching.PatchRepository.CustomDataKey) == null)
 			{
 				return;
 			}

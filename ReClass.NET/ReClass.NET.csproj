@@ -1023,6 +1023,29 @@
   <ItemGroup>
     <None Include="Resources\Images\B16x16_Button_NUInt.png" />
   </ItemGroup>
+  <ItemGroup>
+    <Reference Include="Iced">
+      <HintPath>..\Dependencies\Iced.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Compile Include="Assembly\InstructionService.cs" />
+    <Compile Include="Assembly\AssemblyService.cs" />
+    <Compile Include="Core\IAdvancedDebugProvider.cs" />
+    <Compile Include="Core\NativeCoreWrapper.Advanced.cs" />
+    <Compile Include="Debugger\WatchCondition.cs" />
+    <Compile Include="Debugger\DebugSession.cs" />
+    <Compile Include="Debugger\DebugWorkspace.cs" />
+    <Compile Include="Patching\PatchContracts.cs" />
+    <Compile Include="Patching\PatchTargetResolver.cs" />
+    <Compile Include="Patching\PatchRepository.cs" />
+    <Compile Include="Patching\PatchPlanner.cs" />
+    <Compile Include="Patching\PatchManager.cs" />
+    <Compile Include="Patching\SessionPatchTarget.cs" />
+    <Compile Include="Forms\AssemblyEditorForm.cs" />
+    <Compile Include="Forms\PatchManagerForm.cs" />
+    <Compile Include="Forms\WatchFinderForm.cs" />
+    <Compile Include="Forms\MainForm.Debugger.cs" />
+  </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <PropertyGroup>
     <PreBuildEvent Condition=" '$(OS)' == 'Windows_NT' ">powershell -Command "((Get-Date).ToUniversalTime()).ToString(\"yyyy\/MM\/dd HH:mm:ss\") | Out-File '$(ProjectDir)Resources\BuildDate.txt'"</PreBuildEvent>

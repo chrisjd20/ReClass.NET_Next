@@ -182,6 +182,7 @@
     <ClCompile Include="CloseRemoteProcess.cpp" />
     <ClCompile Include="ControlRemoteProcess.cpp" />
     <ClCompile Include="Debugger.cpp" />
+    <ClCompile Include="AdvancedDebugger.cpp" />
     <ClCompile Include="DisassembleCode.cpp" />
     <ClCompile Include="EnumerateProcesses.cpp" />
     <ClCompile Include="EnumerateRemoteSectionsAndModules.cpp" />
@@ -208,6 +209,7 @@
     <ClInclude Include="..\Dependencies\distorm\src\x86defs.h" />
     <ClInclude Include="..\ReClassNET_Plugin.hpp" />
     <ClInclude Include="..\Shared\DistormHelper.hpp" />
+    <ClInclude Include="..\Shared\AdvancedDebugger.hpp" />
     <ClInclude Include="..\Shared\Keys.hpp" />
     <ClInclude Include="NativeCore.hpp" />
   </ItemGroup>

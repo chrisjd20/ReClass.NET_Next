@@ -18,9 +18,19 @@ You may need additional permission to inspect another process. This application
 does not change ptrace policy, capabilities or other system settings for you.
 Only x64 processes and matching Linux plugins are supported in this package.
 
+The Debugger menu provides assembly/hex inspection and saved patches. Scanner
+and memory-node actions can find writers/accesses; an instruction can also
+collect the data addresses it accesses. The package includes the NASM Intel
+syntax assembler. Equal/shorter replacements use reviewed in-place edits;
+longer replacements require an explicit hook. Published hook allocations
+remain reserved until target exit, even after Restore or detach. Saved patch
+definitions load inactive and require explicit resolution/Apply.
+Read DEBUGGER.md for the workflow, conditions, trace and recovery instructions.
+
 Existing Linux limitations: Windows PDB support and several desktop integrations
-are unavailable; global keyboard polling is stubbed; debugger thread handling
-has upstream limitations. These archives do not promise full Windows parity.
+are unavailable; global keyboard polling is stubbed. The optional advanced core
+provides the native all-thread ptrace debugger. These archives do not promise
+full parity for unrelated Windows integrations or legacy plugin providers.
 
 BUILD.json records the source and toolchain versions. The repository documents
 automated compatibility checks and manual desktop validation steps.

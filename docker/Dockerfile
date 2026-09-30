@@ -12,13 +12,23 @@ RUN msbuild ReClass.NET_Tests/ReClass.NET_Tests.csproj /t:Restore /p:Configurati
     && msbuild ReClass.NET_Tests/ReClass.NET_Tests.csproj /p:Configuration=Release /p:Platform=x64 /p:SolutionDir=/src/ /p:OutputPath=/out/tests/ /verbosity:minimal \
     && mono Dependencies/nuget.exe install xunit.runner.console -Version 2.4.1 -OutputDirectory /tools -NonInteractive -Source https://api.nuget.org/v3/index.json
 
+# Opt-in focused debugger checks; this stage does not invoke the legacy suite.
+FROM managed AS debugger-focused
+RUN msbuild validation/debugger/FocusedChecks.csproj /p:Configuration=Release /p:AppOutputPath=/out/app /p:OutputPath=/out/validation/focused/ /verbosity:minimal \
+    && msbuild validation/debugger/RuntimeWalkthrough.csproj /p:Configuration=Release /p:AppOutputPath=/out/app /p:OutputPath=/out/validation/focused/ /verbosity:minimal
+
 FROM ubuntu:22.04@sha256:b8b6ee6aa931ecd9d0d952abc34dc0e5f7c6a30c6bb71b079fe399fde0329c02 AS native
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y --no-install-recommends cmake g++ gcc make g++-mingw-w64-x86-64-posix ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends cmake g++ gcc make g++-mingw-w64-x86-64-posix ca-certificates curl xz-utils perl python3 \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
-COPY NativeCore NativeCore
 COPY docker/mingw-x64.cmake docker/mingw-x64.cmake
+COPY Dependencies/assembly-dependencies.json Dependencies/assembly-dependencies.json
+COPY docker/build-assembler.sh docker/build-assembler.sh
+RUN bash docker/build-assembler.sh
+COPY NativeCore NativeCore
+COPY validation/debugger validation/debugger
+RUN bash validation/debugger/build-target.sh
 RUN cmake -S NativeCore -B /out/linux -DCMAKE_BUILD_TYPE=Release \
     && cmake --build /out/linux --parallel 2 \
     && cmake -S NativeCore -B /out/windows -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=/src/docker/mingw-x64.cmake \
@@ -35,6 +45,7 @@ COPY --from=managed /out /managed
 COPY --from=native /out /native
 COPY Dependencies /dependencies
 COPY LICENSE SOURCE.json /metadata/
+COPY docs/DEBUGGER.md /metadata/DEBUGGER.md
 COPY docker /scripts
 ARG SOURCE_REVISION=working-tree
 RUN python3 /scripts/package.py "$SOURCE_REVISION" \
@@ -42,6 +53,35 @@ RUN python3 /scripts/package.py "$SOURCE_REVISION" \
 
 FROM packages AS export
 ENTRYPOINT ["/bin/bash", "/scripts/export.sh"]
+
+# Native Linux walkthrough/desktop acceptance environment; no automatic test run.
+FROM ubuntu:22.04@sha256:b8b6ee6aa931ecd9d0d952abc34dc0e5f7c6a30c6bb71b079fe399fde0329c02 AS debugger-runtime
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends mono-devel libgdiplus xvfb xauth fonts-liberation \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=packages /artifacts /artifacts
+COPY --from=debugger-focused /out/validation/focused /validation/focused
+COPY --from=managed /out/app /validation/focused
+COPY --from=native /out/linux/out/NativeCore.so /validation/focused/NativeCore.so
+COPY --from=native /out/nasm/linux/nasm /validation/focused/Tools/nasm
+COPY --from=native /out/validation/linux /validation/targets/linux
+COPY Dependencies/ColorCode.dll Dependencies/Dia2Lib.dll Dependencies/Microsoft.ExceptionMessageBox.dll /validation/focused/
+WORKDIR /validation/focused
+ENTRYPOINT ["/bin/bash"]
+
+# Explicitly selected validation export; builds the small fixture and focused batch,
+# but runs neither the focused batch nor the historical test suite.
+FROM mono:6.12.0.182@sha256:34d816779b1248b5cfd095770b64ecbaf1798e2aca693a91c11a018dce9c7ad5 AS debugger-validation-export
+COPY --from=managed /out/app /validation/focused
+COPY --from=debugger-focused /out/validation/focused /validation/focused
+COPY --from=native /out/linux/out/NativeCore.so /validation/focused/NativeCore.so
+COPY --from=native /out/windows/out/NativeCore.dll /validation/focused/NativeCore.dll
+COPY Dependencies/ColorCode.dll Dependencies/Dia2Lib.dll Dependencies/Microsoft.ExceptionMessageBox.dll Dependencies/x64/symsrv.dll /validation/focused/
+COPY --from=native /out/nasm/linux/nasm /validation/focused/Tools/nasm
+COPY --from=native /out/nasm/windows/nasm.exe /validation/focused/Tools/nasm.exe
+COPY --from=native /out/validation /validation/targets
+COPY docker/export-debugger-validation.sh /scripts/export-debugger-validation.sh
+ENTRYPOINT ["/bin/bash", "/scripts/export-debugger-validation.sh"]
 
 FROM ubuntu:22.04@sha256:b8b6ee6aa931ecd9d0d952abc34dc0e5f7c6a30c6bb71b079fe399fde0329c02 AS test
 ENV DEBIAN_FRONTEND=noninteractive

@@ -1,7 +1,9 @@
 #include <sys/ptrace.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <sys/time.h>
+#include <chrono>
+#include <thread>
+#include <algorithm>
 #include <sys/user.h>
 #include <experimental/filesystem>
 #include <cstddef>
@@ -10,40 +12,18 @@
 
 namespace fs = std::experimental::filesystem;
 
-int ualarm(unsigned int milliseconds)
-{
-	struct itimerval nval = { 0 };
-	nval.it_value.tv_sec = milliseconds / 1000;
-	nval.it_value.tv_usec = static_cast<long int>(milliseconds % 1000) * 1000;
-	struct itimerval oval;
-	if (setitimer(ITIMER_REAL, &nval, &oval) < 0)
-		return 0;
-	else
-		return oval.it_value.tv_sec;
-}
-
+// Legacy waits retain their ABI without installing process-global alarm state.
 pid_t waitpid_timeout(pid_t pid, int* status, int options, int timeoutInMilliseconds, bool& timedOut)
 {
-	struct sigaction sig = {};
-	sig.sa_flags = 0;
-	sig.sa_handler = [](int) {};
-	sigfillset(&sig.sa_mask);
-	sigaction(SIGALRM, &sig, nullptr);
-
-	ualarm(timeoutInMilliseconds);
-
-	auto res = waitpid(pid, status, options);
-	if (res == -1 && errno == EINTR)
-	{
-		timedOut = true;
-	}
-	else
-	{
-		ualarm(0); // Cancel the alarm.
-
-		timedOut = false;
-	}
-	return res;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(std::max(0, timeoutInMilliseconds));
+    timedOut = false;
+    for (;;)
+    {
+        const auto result = waitpid(pid, status, options | WNOHANG | __WALL);
+        if (result > 0 || (result < 0 && errno != EINTR)) return result;
+        if (std::chrono::steady_clock::now() >= deadline) { timedOut = true; return 0; }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
 }
 
 pid_t waitpid_timeout(int* status, int timeoutInMilliseconds, bool& timedOut)

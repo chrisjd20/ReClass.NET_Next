@@ -26,6 +26,11 @@ namespace ReClassNET.Project
 
 		public string Path { get; set; }
 
+		public bool IsDirty { get; private set; }
+		public event EventHandler DirtyChanged;
+		public void MarkDirty() { IsDirty = true; DirtyChanged?.Invoke(this, EventArgs.Empty); }
+		public void MarkSaved() { IsDirty = false; DirtyChanged?.Invoke(this, EventArgs.Empty); }
+
 		/// <summary>
 		/// Key-Value map with custom data for plugins to store project related data.
 		/// The preferred key format is {Plugin Name}_{Key Name}.

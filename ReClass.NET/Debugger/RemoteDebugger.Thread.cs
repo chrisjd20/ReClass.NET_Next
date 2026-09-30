@@ -13,7 +13,9 @@ namespace ReClassNET.Debugger
 		private volatile bool running = true;
 		private volatile bool isAttached;
 
-		public bool IsAttached => isAttached;
+		public bool IsAttached => process.ExistingDebugWorkspace != null
+			? process.ExistingDebugWorkspace.Session.State == DebugSessionState.Running || process.ExistingDebugWorkspace.Session.State == DebugSessionState.Paused
+			: isAttached;
 
 		public bool StartDebuggerIfNeeded(Func<bool> queryAttach)
 		{
@@ -22,6 +24,15 @@ namespace ReClassNET.Debugger
 			if (!process.IsValid)
 			{
 				return false;
+			}
+
+			var advanced = process.CoreFunctions.CurrentFunctions as ReClassNET.Core.IAdvancedDebugProvider;
+			if (advanced != null && (advanced.Capabilities & ReClassNET.Core.AdvancedCapabilities.Session) != 0)
+			{
+				if (IsAttached) return true;
+				if (!queryAttach()) return false;
+				try { process.DebugWorkspace.Session.AttachAsync().GetAwaiter().GetResult(); return true; }
+				catch (Exception e) { System.Windows.Forms.MessageBox.Show(e.Message, "Debugger attachment failed"); return false; }
 			}
 
 			lock (syncThread)
@@ -94,6 +105,7 @@ namespace ReClassNET.Debugger
 
 		private void Terminate(bool join)
 		{
+			process.CloseDebugWorkspace();
 			lock (syncBreakpoint)
 			{
 				foreach (var bp in breakpoints)

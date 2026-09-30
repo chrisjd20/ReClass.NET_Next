@@ -10,12 +10,16 @@ import sys
 artifacts = pathlib.Path('/artifacts')
 artifacts.mkdir()
 source = json.loads(pathlib.Path('/metadata/SOURCE.json').read_text())
+assembly_dependencies = json.loads(pathlib.Path('/dependencies/assembly-dependencies.json').read_text())
+assert hashlib.sha256(pathlib.Path('/dependencies/Iced.dll').read_bytes()).hexdigest() == assembly_dependencies['iced']['dll_sha256']
+assembly_dependencies['nasm'] = json.loads(pathlib.Path('/native/nasm/build.json').read_text())
 manifest = {
     'source': source,
     'repository_revision': sys.argv[1],
     'source_tree_sha256': pathlib.Path('/managed/source.sha256').read_text().strip(),
     'built_at_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
     'architectures': ['x86_64'],
+    'assembly_dependencies': assembly_dependencies,
     'tools': {
         'mono': pathlib.Path('/managed/mono-version.txt').read_text(),
         'msbuild': pathlib.Path('/managed/msbuild-version.txt').read_text(),
@@ -39,8 +43,16 @@ for platform, native_name in [('windows', 'NativeCore.dll'), ('linux', 'NativeCo
     shutil.copytree('/managed/app', root)
     for dependency in ('ColorCode.dll', 'Dia2Lib.dll', 'Microsoft.ExceptionMessageBox.dll'):
         shutil.copy('/dependencies/' + dependency, root / dependency)
+    shutil.copy('/dependencies/Iced.dll', root / 'Iced.dll')
+    shutil.copytree('/dependencies/Licenses', root / 'Licenses')
+    (root / 'ASSEMBLY-DEPENDENCIES.json').write_text(json.dumps(assembly_dependencies, indent=2) + '\n')
+    (root / 'Tools').mkdir()
+    assembler = 'nasm.exe' if platform == 'windows' else 'nasm'
+    shutil.copy('/native/nasm/' + platform + '/' + assembler, root / 'Tools' / assembler)
+    (root / 'Tools' / assembler).chmod(0o755 if platform == 'linux' else 0o644)
     shutil.copy('/native/' + platform + '/out/' + native_name, root / native_name)
     shutil.copy('/metadata/LICENSE', root / 'LICENSE')
+    shutil.copy('/metadata/DEBUGGER.md', root / 'DEBUGGER.md')
     shutil.copy(artifacts / 'build-manifest.json', root / 'BUILD.json')
     shutil.copy('/scripts/' + platform + '-README.txt', root / 'README.txt')
     (root / 'Plugins').mkdir()
