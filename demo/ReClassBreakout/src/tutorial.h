@@ -15,6 +15,13 @@ struct TutorialStep {
     // One line on why this step works, and what the player should see afterwards.
     std::string why, see;
 };
+// A longer, plain-language explanation shown in the Explain window. Text uses
+// blank lines between blocks; a block of "- " lines is a bullet list, a block
+// starting with "> " is a callout, and a block starting with "```" is code.
+struct ExplainSection {
+    std::string title;
+    std::string text;
+};
 struct Lesson {
     int id;
     std::string title;
@@ -23,6 +30,7 @@ struct Lesson {
     std::vector<TutorialStep> steps;
     std::string learned;
     std::string restore;
+    std::vector<ExplainSection> explain;
 };
 const std::vector<Lesson>& Lessons();
 const std::string& FindRookieRecipe();

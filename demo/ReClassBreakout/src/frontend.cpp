@@ -297,9 +297,9 @@ int runFrontend(int initialRoom, const std::string& attachmentDiagnostic, bool u
     Scene scene;
     scene.load();
     identity(game);
-    bool menu = false, help = false, quit = false, dirty = true, previousHot = false, recipeOpen = false;
+    bool menu = false, help = false, explain = false, quit = false, dirty = true, previousHot = false, recipeOpen = false;
     int tab = 0;
-    Scroll fieldScroll, tutorialScroll, menuScroll, helpScroll;
+    Scroll fieldScroll, tutorialScroll, menuScroll, helpScroll, explainScroll;
     std::uint64_t sequence = 0;
     double lastSave = GetTime(), toastUntil = 0, failUntil = 0, goUntil = 0, completeUntil = 0;
     std::string toast, previousTooltip;
@@ -318,7 +318,7 @@ int runFrontend(int initialRoom, const std::string& attachmentDiagnostic, bool u
     const auto selectRoom = [&](int room) {
         if (!unlocked(room)) { notify("Room " + std::to_string(room) + " is locked. Complete room " + std::to_string(room - 1) + " to open it."); return; }
         game.setRoom(room); progress.room = room; dirty = true;
-        menu = false; recipeOpen = false; sceneReset = true;
+        menu = false; explain = false; recipeOpen = false; sceneReset = true; explainScroll = {};
         fieldScroll = {}; tutorialScroll = {};
         logAction(game, sequence, "room");
     };
@@ -361,7 +361,7 @@ int runFrontend(int initialRoom, const std::string& attachmentDiagnostic, bool u
         const bool shift = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT) || pressed(KEY_LEFT_SHIFT) || pressed(KEY_RIGHT_SHIFT);
         if (ctrl && pressed(KEY_Q)) quit = true;
         for (int i = 0; i < 12; ++i) if (pressed(KEY_F1 + i)) selectRoom(shift ? (i == 0 ? 13 : i == 11 ? 0 : i + 1) : i + 1);
-        if (pressed(KEY_ESCAPE)) { menu = !menu; help = false; }
+        if (pressed(KEY_ESCAPE)) { if (explain) explain = false; else { menu = !menu; help = false; } }
         if (pressed(KEY_SLASH) && !ctrl) help = !help;
         if (pressed(KEY_TAB) && !ctrl) { progress.drawer = !progress.drawer; dirty = true; }
         if (ctrl && pressed(KEY_R)) reset();
@@ -375,7 +375,7 @@ int runFrontend(int initialRoom, const std::string& attachmentDiagnostic, bool u
             for (const auto& hook : hooks) if (pressed(hook.first)) perform(hook.second);
             if (pressed(KEY_O)) perform(game.room() == 2 ? Action::ActivateReactor : Action::EvaluateDoor);
         }
-        const bool overlay = menu || help;
+        const bool overlay = menu || help || explain;
         Zone reach;
         const bool canUse = !overlay && game.interaction(reach);
         if (canUse && !ctrl && pressed(KEY_E)) perform(reach.action);
@@ -570,7 +570,7 @@ int runFrontend(int initialRoom, const std::string& attachmentDiagnostic, bool u
             if (picked >= 0) tab = picked;
             if (ui.button({d.x + d.width - 42, d.y + 8, 32, 28}, ">", 15, false, "Tab: hide the drawer for a larger game view")) { progress.drawer = false; dirty = true; }
             // The steps tab keeps a fixed footer for the next room in every room.
-            const bool nextFooter = tab == 0 && room + 1 < Game::roomCount;
+            const bool nextFooter = tab == 0;
             const Rectangle body{d.x + 14, d.y + 50, d.width - 22, d.height - (nextFooter ? 116.0f : 60.0f)};
             if (tab == 0) {
                 ui.clip = body;
@@ -680,11 +680,16 @@ int runFrontend(int initialRoom, const std::string& attachmentDiagnostic, bool u
                 if (nextFooter) {
                     const float footY = d.y + d.height - 56;
                     DrawLineEx({d.x + 12, footY - 8}, {d.x + d.width - 12, footY - 8}, 1, Border);
-                    const bool ready = progress.completed[room];
-                    const std::string label = ready ? "Next room: " + lessons[room + 1].title + "  ->" : "Next room: complete this room to unlock";
-                    if (ui.button({d.x + 12, footY, d.width - 24, 42}, label, 15, ready,
-                                  ready ? "Go to room " + std::to_string(room + 1) : "The game unlocks " + lessons[room + 1].title + " once it sees this room's goal met", ready))
-                        selectRoom(room + 1);
+                    const bool hasNext = room + 1 < Game::roomCount;
+                    const float explainW = hasNext ? 120.0f : d.width - 24;
+                    if (ui.button({d.x + 12, footY, explainW, 42}, "Explain", 15, explain, "What this room teaches and why it works, in plain language")) { explain = !explain; explainScroll = {}; }
+                    if (hasNext) {
+                        const bool ready = progress.completed[room];
+                        const std::string label = ready ? "Next room: " + lessons[room + 1].title + "  ->" : "Next room: complete this room";
+                        if (ui.button({d.x + 20 + explainW, footY, d.width - 32 - explainW, 42}, label, 15, ready,
+                                      ready ? "Go to room " + std::to_string(room + 1) : "The game unlocks " + lessons[room + 1].title + " once it sees this room's goal met", ready))
+                            selectRoom(room + 1);
+                    }
                 }
             } else {
                 const float half = (body.width - 18) * .5f;
@@ -774,6 +779,81 @@ int runFrontend(int initialRoom, const std::string& attachmentDiagnostic, bool u
             }
             menuScroll.end(menuBody, endY);
             if (ui.button({surface.x + 20, surface.y + surface.height - 50, 210, 34}, "Back to the room", 14)) menu = false;
+        } else if (explain) {
+            ui.blocked = false;
+            DrawRectangleRec({0, Layout::TopH, screenW, screenH}, Fade(Background, .88f));
+            const float width = std::min(screenW - 60, 980.0f);
+            const Rectangle surface{(screenW - width) * .5f, Layout::TopH + 14, width, screenH - Layout::TopH - 34};
+            panel(surface, Color{14, 21, 32, 255});
+            DrawRectangleRec({surface.x, surface.y, surface.width, 4}, Teal);
+            heading((room < 10 ? "ROOM 0" : "ROOM ") + std::to_string(room) + "  -  " + lesson.chapter, surface.x + 28, surface.y + 22, 11, Gold);
+            text(lesson.title + ", explained", surface.x + 28, surface.y + 38, 26, Ink, Face::Bold);
+            if (ui.button({surface.x + surface.width - 136, surface.y + 22, 112, 34}, "Close (Esc)", 13)) explain = false;
+            const Rectangle explainBody{surface.x + 28, surface.y + 84, surface.width - 44, surface.height - 100};
+            ui.clip = explainBody;
+            explainScroll.begin(explainBody, false);
+            float ey = explainBody.y - explainScroll.offset;
+            const float ew = explainBody.width - 24, body = font + 1;
+            for (std::size_t i = 0; i < lesson.explain.size(); ++i) {
+                const auto& section = lesson.explain[i];
+                // Section heading with a numbered marker.
+                DrawCircleV({explainBody.x + 13, ey + 13}, 13, Fade(Teal, .18f));
+                const std::string number = std::to_string(i + 1);
+                text(number, explainBody.x + 13 - textWidth(number, 14, Face::Bold) * .5f, ey + 5, 14, Teal, Face::Bold);
+                text(section.title, explainBody.x + 36, ey + 1, body + 5, Teal, Face::Bold);
+                ey += body + 18;
+                std::size_t at = 0;
+                while (at < section.text.size()) {
+                    auto end = section.text.find("\n\n", at);
+                    if (end == std::string::npos) end = section.text.size();
+                    const std::string block = section.text.substr(at, end - at);
+                    at = end + 2;
+                    if (block.rfind("```", 0) == 0) {
+                        // Code: monospace on a dark panel.
+                        std::vector<std::string> lines;
+                        std::size_t line = block.find('\n') + 1;
+                        while (line < block.size()) {
+                            auto stop = block.find('\n', line);
+                            if (stop == std::string::npos) stop = block.size();
+                            const auto content = block.substr(line, stop - line);
+                            if (content.rfind("```", 0) != 0) lines.push_back(content);
+                            line = stop + 1;
+                        }
+                        const float lineH = body * 1.35f, boxH = static_cast<float>(lines.size()) * lineH + 20;
+                        DrawRectangleRounded({explainBody.x + 36, ey, ew - 36, boxH}, .04f, 4, Color{9, 14, 22, 255});
+                        DrawRectangleRoundedLinesEx({explainBody.x + 36, ey, ew - 36, boxH}, .04f, 4, 1, Border);
+                        float ly = ey + 10;
+                        for (const auto& content : lines) { text(content, explainBody.x + 50, ly, body - 1, Teal, Face::Mono); ly += lineH; }
+                        ey += boxH + 14;
+                    } else if (block.rfind("- ", 0) == 0) {
+                        std::size_t line = 0;
+                        while (line < block.size()) {
+                            auto stop = block.find('\n', line);
+                            if (stop == std::string::npos) stop = block.size();
+                            const auto item = block.substr(line + 2, stop - line - 2);
+                            DrawCircleV({explainBody.x + 46, ey + body * .62f}, 3.5f, Teal);
+                            ey = rich(item, explainBody.x + 58, ey, ew - 58, body, Ink) + 4;
+                            line = stop + 1;
+                        }
+                        ey += 10;
+                    } else if (block.rfind("> ", 0) == 0) {
+                        // Key idea callout.
+                        const std::string idea = block.substr(2);
+                        const float h = rich(idea, explainBody.x + 52, ey + 24, ew - 64, body, Ink, false) - ey + 8;
+                        DrawRectangleRounded({explainBody.x + 36, ey, ew - 36, h}, .08f, 4, Fade(Gold, .10f));
+                        DrawRectangle(static_cast<int>(explainBody.x + 36), static_cast<int>(ey), 4, static_cast<int>(h), Gold);
+                        text("KEY IDEA", explainBody.x + 52, ey + 8, 10, Gold, Face::Bold);
+                        rich(idea, explainBody.x + 52, ey + 24, ew - 64, body, Ink);
+                        ey += h + 30;
+                    } else {
+                        ey = rich(block, explainBody.x + 36, ey, ew - 36, body, Color{214, 224, 238, 255}) + 12;
+                    }
+                }
+                ey += 18;
+                if (i + 1 < lesson.explain.size()) { DrawLineEx({explainBody.x + 36, ey - 12}, {explainBody.x + ew, ey - 12}, 1, Border); ey += 6; }
+            }
+            explainScroll.end(explainBody, ey + 10);
+            ui.clip = {0, 0, screenW, screenH};
         } else if (help) {
             ui.blocked = false;
             const Rectangle surface{Layout::Margin, Layout::TopH, screenW - Layout::Margin * 2, screenH - Layout::TopH - Layout::Margin};

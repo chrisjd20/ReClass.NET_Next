@@ -69,6 +69,11 @@ def validate(data):
         for key in ("title", "chapter", "goal", "learned"):
             if not isinstance(lesson.get(key), str) or not lesson[key].strip():
                 raise ValueError(f"Room {lesson['id']} lacks {key}")
+        explain = lesson.get("explain")
+        if not isinstance(explain, list) or not explain or any(
+                not isinstance(x.get("title"), str) or not x["title"].strip() or
+                not isinstance(x.get("text"), str) or not x["text"].strip() for x in explain):
+            raise ValueError(f"Room {lesson['id']} needs explain sections with a title and text")
         if not lesson.get("steps"):
             raise ValueError(f"Room {lesson['id']} has no steps")
         for step in lesson["steps"]:
@@ -101,7 +106,8 @@ def generate_cpp(data, lessons):
                                                        ('where', 'text', 'check')) + ', ' + str(step.get('loop', 0)) + ', ' +
                          cpp_string(step.get('why', '')) + ', ' + cpp_string(step.get('see', '')) + '},')
         lines.append('            },')
-        lines.append('            ' + cpp_string(lesson['learned']) + ', ' + cpp_string(lesson.get('restore', '')) + '},')
+        lines.append('            ' + cpp_string(lesson['learned']) + ', ' + cpp_string(lesson.get('restore', '')) + ',')
+        lines.append('            {' + ', '.join('{' + cpp_string(x['title']) + ', ' + cpp_string(x['text']) + '}' for x in lesson['explain']) + '}},')
     lines += ['    };', '    return lessons;', '}',
               'const std::string& FindRookieRecipe() {',
               '    static const std::string recipe = ' + cpp_string(data['find_rookie']) + ';',
@@ -138,6 +144,9 @@ def generate_markdown(data, lessons):
         if lesson.get('restore'):
             lines += ['**Before leaving:** ' + lesson['restore'], '']
         lines += ['*What you learned:* ' + lesson['learned'], '']
+        lines += [f"### Room {lesson['id']} explained", '']
+        for section in lesson['explain']:
+            lines += [f"#### {section['title']}", '', section['text'], '']
     lines += ['## Find ROOKIE again', '', data['find_rookie'], '']
     return '\n'.join(lines)
 
@@ -152,7 +161,7 @@ def generate_html(data, lessons):
     lines = ['<!doctype html><html lang="en"><head><meta charset="utf-8">',
              '<meta name="viewport" content="width=device-width, initial-scale=1">',
              '<title>ReClass: Breakout — Offline guide</title>',
-             '<style>body{margin:auto;padding:2rem;max-width:60rem;background:#101923;color:#eef3f7;font:18px/1.6 system-ui,sans-serif}a{color:#8ed5ff}nav a{display:inline-block;margin:0 .8rem .4rem 0}h1,h2{line-height:1.25}h2{margin-top:2.5rem;border-top:1px solid #526272;padding-top:1rem}ol li{margin:.6rem 0;white-space:pre-wrap}.tag{display:inline-block;font-size:.72rem;font-weight:700;padding:.05rem .45rem;border-radius:.6rem;margin-right:.5rem}.game{background:#173d36;color:#48dbb5}.reclass{background:#2c2047;color:#b084ff}code{background:#1e2c3d;color:#48dbb5;padding:.05rem .3rem;border-radius:.25rem}.goal{border-left:3px solid #48dbb5;padding-left:1rem}.learned{color:#a9bbd0;font-style:italic}.restore{color:#f9bf57}.repeat{color:#f9bf57}.why{color:#a9bbd0}.see{color:#f9bf57}@media print{body{background:white;color:black}}</style>',
+             '<style>body{margin:auto;padding:2rem;max-width:60rem;background:#101923;color:#eef3f7;font:18px/1.6 system-ui,sans-serif}a{color:#8ed5ff}nav a{display:inline-block;margin:0 .8rem .4rem 0}h1,h2{line-height:1.25}h2{margin-top:2.5rem;border-top:1px solid #526272;padding-top:1rem}ol li{margin:.6rem 0;white-space:pre-wrap}.tag{display:inline-block;font-size:.72rem;font-weight:700;padding:.05rem .45rem;border-radius:.6rem;margin-right:.5rem}.game{background:#173d36;color:#48dbb5}.reclass{background:#2c2047;color:#b084ff}code{background:#1e2c3d;color:#48dbb5;padding:.05rem .3rem;border-radius:.25rem}.goal{border-left:3px solid #48dbb5;padding-left:1rem}.learned{color:#a9bbd0;font-style:italic}.restore{color:#f9bf57}.repeat{color:#f9bf57}.why{color:#a9bbd0}.explain{border:1px solid #526272;border-radius:.4rem;padding:.4rem 1rem;margin:1rem 0}.explain summary{cursor:pointer;color:#48dbb5;font-weight:700}.callout{border-left:3px solid #f9bf57;padding-left:1rem;color:#f9bf57}pre{background:#0c131d;color:#48dbb5;padding:.6rem;border-radius:.3rem;overflow-x:auto}.see{color:#f9bf57}@media print{body{background:white;color:black}}</style>',
              '</head><body><h1>ReClass: Breakout — Offline guide</h1>',
              '<p>' + html_text(data['introduction']) + '</p>',
              '<p>Keep this guide open beside ReClass: a ReClass debugger pause also freezes the game window.</p>', '<nav aria-label="Rooms">']
@@ -170,7 +179,20 @@ def generate_html(data, lessons):
         lines.append('</ol>')
         if lesson.get('restore'):
             lines.append('<p class="restore">Before leaving: ' + html_text(lesson['restore']) + '</p>')
-        lines += ['<p class="learned">What you learned: ' + html_text(lesson['learned']) + '</p>', '</article>']
+        lines += ['<p class="learned">What you learned: ' + html_text(lesson['learned']) + '</p>']
+        lines.append('<details class="explain"><summary>Explained</summary>')
+        for section in lesson['explain']:
+            lines.append('<h3>' + html.escape(section['title']) + '</h3>')
+            for block in section['text'].split('\n\n'):
+                if block.startswith('```'):
+                    lines.append('<pre>' + html.escape(block.strip('`').strip('\n')) + '</pre>')
+                elif block.startswith('- '):
+                    lines.append('<ul>' + ''.join('<li>' + html_text(item[2:]) + '</li>' for item in block.split('\n')) + '</ul>')
+                elif block.startswith('> '):
+                    lines.append('<p class="callout">' + html_text(block[2:]) + '</p>')
+                else:
+                    lines.append('<p>' + html_text(block) + '</p>')
+        lines += ['</details>', '</article>']
     lines += ['<article id="find-rookie"><h2>Find ROOKIE again</h2><p>' + html_text(data['find_rookie']) + '</p></article>', '</body></html>\n']
     return '\n'.join(lines)
 

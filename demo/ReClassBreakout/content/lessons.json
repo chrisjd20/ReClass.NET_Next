@@ -28,7 +28,21 @@
           "check": "moved_right"
         }
       ],
-      "learned": "ReClass is attached. Every room from here on changes something inside this process."
+      "learned": "ReClass is attached. Every room from here on changes something inside this process.",
+      "explain": [
+        {
+          "title": "What ReClass actually does",
+          "text": "Every number you see in a game (health, ammo, a timer, a position) is stored somewhere in the game's memory as a few bytes. ReClass is a tool that can look inside another running program's memory, show you those bytes, and change them while the program keeps running.\n\nAttaching is you asking the operating system for permission to do that. Once ReClass is attached, the game never notices: from its point of view, its own numbers just changed by themselves."
+        },
+        {
+          "title": "The plan for the whole game",
+          "text": "Every room follows the same loop:\n\n- Find: locate the value or code that matters.\n- Understand: work out what it is and what sits around it.\n- Change: edit it, and watch the game react.\n\nEach room adds one new way to find or change things, and later rooms reuse what earlier rooms built."
+        },
+        {
+          "title": "Your first tool: the Scanner",
+          "text": "`Memory Searcher...` opens the Scanner. It searches all of the game's memory for a value and gives you a list of addresses that match. `First Scan` starts a new search; `Next Scan` only re-checks the addresses from the previous list. That second part is the whole trick, and Room 1 shows why.\n\n> Watch the game window: whenever a value changes from outside the game, it flashes violet as MEMORY WRITE DETECTED. That's your edit landing."
+        }
+      ]
     },
     {
       "id": 1,
@@ -74,7 +88,29 @@
           "check": "complete"
         }
       ],
-      "learned": "An exact-value scan plus a controlled change (shoot, value drops) narrows thousands of matches down to the one that matters."
+      "learned": "An exact-value scan plus a controlled change (shoot, value drops) narrows thousands of matches down to the one that matters.",
+      "explain": [
+        {
+          "title": "The big idea",
+          "text": "You want ROOKIE's ammo, but memory is huge and the number 12 is everywhere: counters, sizes, colours, leftovers. A single search can't tell them apart. What can tell them apart is behaviour: only the real ammo drops to 11 when you shoot.\n\n> Search, change the value in the game, search again for the new value. Each round keeps only the addresses that followed along."
+        },
+        {
+          "title": "Why this works",
+          "text": "`First Scan` for 12 might give thousands of results. When you shoot and `Next Scan` for 11, ReClass checks only those thousands again. Unrelated 12s don't turn into 11 at the exact moment you fired, so they fall away. Usually one or two rounds is enough."
+        },
+        {
+          "title": "Types matter",
+          "text": "Ammo is a whole number stored in 4 bytes, which ReClass calls `Integer (4 Bytes)`. If you searched for the same number as a `Float (4 Bytes)`, ReClass would compare different bit patterns and miss it. When a search finds nothing, the type is the first thing to check."
+        },
+        {
+          "title": "Changing the value",
+          "text": "Once you have the address, writing 100 there changes the game's real state. The game doesn't keep a backup copy and it doesn't double-check: it simply reads ammo = 100 the next time you fire."
+        },
+        {
+          "title": "In real games",
+          "text": "This is the classic first move for money, health, ammo and score. Two common snags:\n\n- The number shown on screen can be a separate display copy; editing that copy changes the text, not the real value.\n- Some games store a value encoded (multiplied, offset or encrypted), so an exact search for the visible number finds nothing."
+        }
+      ]
     },
     {
       "id": 2,
@@ -124,7 +160,29 @@
           "check": "complete"
         }
       ],
-      "learned": "When you can't see a value, scan for how it changes: increased, decreased, unchanged."
+      "learned": "When you can't see a value, scan for how it changes: increased, decreased, unchanged.",
+      "explain": [
+        {
+          "title": "The big idea",
+          "text": "Here you can't see the exact number, only a bar. So instead of searching for a value, you search for how it behaves: it went up, it went down, it didn't change."
+        },
+        {
+          "title": "Start with a sensible range",
+          "text": "Charge is a percentage and the bar isn't empty, so the real value must be somewhere between 5 and 100. `Is Between` 5 and 100 throws out millions of values in one go. Much of what's left is the game's own graphics data, mostly colours stored as fractions between 0 and 1, which the range excludes.\n\n> Before any relative scan, use what you know: the type, a plausible range, whether it can be negative."
+        },
+        {
+          "title": "How the relative scans narrow it",
+          "text": "- `Has Increased` keeps values that went up since the previous scan (you stood on the charge pad).\n- `Has Decreased` keeps values that went down (you stood on the drain vent).\n- `Has Not Changed` keeps values that stayed put (you stood still).\n\nEach scan compares against the snapshot from the previous scan. So do the in-game action, stop, then scan. Don't scan while things are still moving."
+        },
+        {
+          "title": "Why floats",
+          "text": "Smoothly changing values (charge, speed, positions, timers) are usually floating-point numbers: `Float (4 Bytes)`. Whole-number counters (ammo, money, kills) are usually integers."
+        },
+        {
+          "title": "In real games",
+          "text": "Health bars without numbers, stamina, hidden reputation, cooldown timers: anything you can make go up and down on demand can be found this way."
+        }
+      ]
     },
     {
       "id": 3,
@@ -158,9 +216,20 @@
         },
         {
           "where": "reclass",
-          "text": "Right-click the result → `Create class at address`. Then click the address at the top of the class, add ` - 4` to the end and press Enter.",
-          "why": "Ammo sits 4 bytes into ROOKIE's data, after health. Subtracting 4 makes the class start at the beginning of ROOKIE.",
-          "see": "A class view with rows 0000, 0008, 0010 and so on."
+          "text": "Right-click the result → `Create class at address`. Click the address at the top of the class, add ` - 0xC` to the end and press Enter.",
+          "why": "This shows you the 12 bytes stored just before your ammo. Fields of one character sit side by side, so the neighbours are other parts of ROOKIE.",
+          "see": "Rows 0000, 0008, 0010 and so on; your ammo is now in the second half of row 0008."
+        },
+        {
+          "where": "reclass",
+          "text": "Right-click row 0008 → `Change Type` → `Int32`.",
+          "see": "It reads 100, matching HP 100 in the HUD: health sits right before ammo. Row 0000 above it looks like random junk, so it isn't part of ROOKIE."
+        },
+        {
+          "where": "reclass",
+          "text": "In the Scanner, right-click your ammo result → `Create class at address` again, and this time add ` - 4` to the class address. Use this new class from now on.",
+          "why": "Health is the first value that belongs to ROOKIE, so his data starts 4 bytes before ammo. Room 6 will confirm it: the game itself points at exactly this address.",
+          "see": "A fresh class whose first 4 bytes are health and next 4 are ammo."
         },
         {
           "where": "game",
@@ -183,7 +252,33 @@
           "see": "You reach the exit with time to spare."
         }
       ],
-      "learned": "You don't need to scan for every value. Find one field you can change, open a class there, and read its neighbours. Keep this class: the next rooms use it."
+      "learned": "You don't need to scan for every value. Find one field you can change, open a class there, and read its neighbours. Keep this class: the next rooms use it.",
+      "explain": [
+        {
+          "title": "The big idea",
+          "text": "You can't scan for speed: it's always 60, so nothing filters it. Instead you find something you can change (ammo), and then look at the memory around it. Speed turns out to be right next door."
+        },
+        {
+          "title": "How games store characters",
+          "text": "Games are usually written in C++ or C#, where a character is a class or struct, something like:\n\n```\nstruct Actor {\n    int   health;   // +0x00\n    int   ammo;     // +0x04\n    float speed;    // +0x08\n    float charge;   // +0x0C\n    float x, y;     // +0x10, +0x14\n};\n```\n\nThe compiler lays those fields out one after another in one block of memory, and each character gets its own copy of that block. So once you find one value, the rest of that character is usually within a few hundred bytes of it."
+        },
+        {
+          "title": "A ReClass class is your guess at that layout",
+          "text": "`Create class at address` opens a view of the memory starting at an address, as rows of bytes. You then tell ReClass what each row is (`Int32`, `Float`, `Pointer`...) and give it a name. You're writing down the game's struct by observation."
+        },
+        {
+          "title": "Where does the object start?",
+          "text": "Nothing in memory says \"ROOKIE starts here\". You work it out:\n\n- Look a little before your ammo: right before it sits 100, matching HP 100 in the HUD. That's health.\n- Before health, the values stop making sense as game data. So health is the first field, and the object starts at ammo - 4.\n- Room 6 confirms it: the game itself points at exactly that address.\n\n> An object usually starts at the first field that makes sense; the game's own pointers to it confirm the guess."
+        },
+        {
+          "title": "Watching values change",
+          "text": "ReClass colours a row red while its value is changing. Walk around and the row holding X and Y flashes; the row holding speed never does. That's often the fastest way to label rows."
+        },
+        {
+          "title": "In real games it's messier",
+          "text": "- Big parts (inventory, weapon, stats) usually live in separate objects, with a pointer to them stored in the character. Room 5.\n- C++ classes with virtual functions start with an 8-byte pointer to a function table, so real fields begin after it.\n- The compiler adds padding gaps to align fields. Room 4.\n- Enemies are often in a list or array: find one and the next is a fixed distance away or one pointer hop further.\n- Some engines store all positions together and all health values together, instead of per character.\n- Characters are created at runtime, so their address changes every launch. Room 6 solves that."
+        }
+      ]
     },
     {
       "id": 4,
@@ -223,7 +318,29 @@
           "see": "The blast door slides open."
         }
       ],
-      "learned": "Small fields share a word or sit in single bytes. Change only the bits you mean to change."
+      "learned": "Small fields share a word or sit in single bytes. Change only the bits you mean to change.",
+      "explain": [
+        {
+          "title": "The big idea",
+          "text": "Not every field is a full number. A yes/no value often takes a single byte, and several on/off switches are often packed into the bits of one number. Edit only the bits you mean to change."
+        },
+        {
+          "title": "Reading flags as bits",
+          "text": "The flags field reads 130. In binary that's 1000 0010:\n\n- bit 1 (value 2) is the alarm.\n- bit 7 (value 128) is maintenance mode, which the door also checks.\n- bit 0 (value 1) is power, and it's off.\n\nFlipping the alarm switch changes 130 to 128: only bit 1 cleared. That's how you confirm which bit means what: change one thing in the game and watch which bit moves."
+        },
+        {
+          "title": "Why 129",
+          "text": "You want power on, alarm off and maintenance kept: 128 + 1 = 129. Writing 1 instead would also clear the maintenance bit, and the door would refuse you.\n\n> To set a bit, add its value; to clear it, subtract it. Never overwrite the whole number blindly."
+        },
+        {
+          "title": "Single bytes and padding",
+          "text": "The keycard is one byte at 0x24. If you wrote a 4-byte number there, you'd also overwrite the next three bytes. Here those are padding, the gap the compiler leaves so the next field starts on an even boundary, but in real games they're often other fields."
+        },
+        {
+          "title": "In real games",
+          "text": "Status effects, unlocked abilities, quest progress and permissions are very often bit flags. Changing the right bit unlocks one thing; changing the whole number can break several."
+        }
+      ]
     },
     {
       "id": 5,
@@ -274,7 +391,29 @@
           "see": "Both sentinels down."
         }
       ],
-      "learned": "Objects move; the pointers to them update. Follow pointers from a stable object instead of remembering addresses."
+      "learned": "Objects move; the pointers to them update. Follow pointers from a stable object instead of remembering addresses.",
+      "explain": [
+        {
+          "title": "The big idea",
+          "text": "Some fields don't hold a value; they hold the address of another object. That's a pointer. ROOKIE doesn't contain a weapon: ROOKIE points to an inventory, which points to the equipped weapon."
+        },
+        {
+          "title": "Following the chain",
+          "text": "A pointer is just an 8-byte number that happens to be an address. Changing a row to `Pointer` tells ReClass to treat it that way and show you the object it points at, nested inside your class: ROOKIE → inventory → equipped weapon → damage."
+        },
+        {
+          "title": "Why the upgrade disappeared",
+          "text": "Swapping weapons creates a brand-new weapon object somewhere else in memory and stores its address in the equipped pointer. Your 30 damage was on the old object, which the game no longer uses.\n\n> Objects come and go; the pointer to the current one is what stays put. Follow pointers from a stable object rather than saving the address of a temporary one."
+        },
+        {
+          "title": "Why your class kept working",
+          "text": "A `Pointer` row in ReClass reads the address stored right now every time it redraws. After the swap it automatically showed the new weapon, so all you had to do was edit damage again."
+        },
+        {
+          "title": "In real games",
+          "text": "Equipment, targets, the current vehicle, the local player inside a player list: almost everything interesting is reached through a chain of pointers. Mapping those chains in ReClass classes is the core of game reverse engineering."
+        }
+      ]
     },
     {
       "id": 6,
@@ -326,7 +465,29 @@
           "see": "LINKS 3 / 3."
         }
       ],
-      "learned": "A green pointer inside the module survives reallocations and restarts. A class at [<module>+offset] always finds the current object."
+      "learned": "A green pointer inside the module survives reallocations and restarts. A class at [<module>+offset] always finds the current object.",
+      "explain": [
+        {
+          "title": "The big idea",
+          "text": "Objects made while the game runs (on the heap) get a new address every launch, and sometimes every time they're rebuilt. But the game's executable is loaded as one block, and its global variables sit at a fixed distance from the start of that block. Find a global that points to your object, and you have a path that always works."
+        },
+        {
+          "title": "Pointer scanning backwards",
+          "text": "Scanning for ROOKIE's address as a `Long (8 Bytes)` finds every place that stores a pointer to ROOKIE. One of them is inside the control block (row 0x18 reads 6, the room number). Scan again for the control block's address, and the result shown in green lives inside the executable itself: a static pointer."
+        },
+        {
+          "title": "Module + offset",
+          "text": "ASLR (address space layout randomization) loads the executable at a different base address every run, but the offset inside it never changes. `<ReClassBreakout>+0x…` means \"the executable's base, plus this offset\", which is the same in every run.\n\nIn a class address, square brackets mean \"read the pointer stored here\". So `[<ReClassBreakout>+0x…]` says: take the executable's current base, add the offset, read the pointer stored there, and show that object.\n\n> Static pointer → current object, recomputed every time. That's why your class followed the relay to each new control block."
+        },
+        {
+          "title": "This also proves Room 3's guess",
+          "text": "The control block points exactly at the address you picked as ROOKIE's start. That's how you confirm where an object begins."
+        },
+        {
+          "title": "In real games",
+          "text": "Real paths are usually longer: [[[module+offset]+0x30]+0x18] and so on. This is what saved cheat tables and trainers are made of, and it's why they keep working after a restart (until a game update moves things)."
+        }
+      ]
     },
     {
       "id": 7,
@@ -384,7 +545,33 @@
         }
       ],
       "learned": "Editing code changes every future execution, not just one value. Always restore what you patch.",
-      "restore": "Restore original (or Patches → Restore all) before leaving. Restart room never restores code."
+      "restore": "Restore original (or Patches → Restore all) before leaving. Restart room never restores code.",
+      "explain": [
+        {
+          "title": "The big idea",
+          "text": "So far you've changed data. Now you change code: the instructions the game runs. Instead of resetting health after each hit, you stop the hit from subtracting anything at all."
+        },
+        {
+          "title": "Finding the code that writes health",
+          "text": "`Find out what writes to this address...` sets a hardware watchpoint: the CPU itself reports every instruction that writes to that address. When the turret hits you, the instruction that subtracts 10 shows up in the list."
+        },
+        {
+          "title": "Why confirm",
+          "text": "The CPU reports the write just after the instruction has finished, so the first row can point at the following instruction. `Confirm next execution` stops on the actual instruction the next time it runs, and the row turns green with its exact boundaries."
+        },
+        {
+          "title": "NOP",
+          "text": "`sub dword [rax], 0xA` means \"subtract 10 from the number at the address in rax\": your health. NOP is an instruction that does nothing. `NOP selection` replaces those bytes with NOPs, so the subtraction never happens.\n\n> A code patch changes every future execution, for everything that runs that code. Data edits change one value once."
+        },
+        {
+          "title": "Always restore",
+          "text": "Patched code stays patched until you `Restore original`. Restarting the room doesn't touch code, and a forgotten patch makes later rooms behave strangely."
+        },
+        {
+          "title": "In real games",
+          "text": "God mode, infinite ammo and no-cooldown cheats are very often a single NOP or small instruction change at the place that writes the value."
+        }
+      ]
     },
     {
       "id": 8,
@@ -438,7 +625,25 @@
         }
       ],
       "learned": "Assembly and hex are two views of the same bytes. A same-size replacement can be patched in place.",
-      "restore": "Restore original (or Patches → Restore all) before leaving."
+      "restore": "Restore original (or Patches → Restore all) before leaving.",
+      "explain": [
+        {
+          "title": "The big idea",
+          "text": "Instead of disabling an instruction, you change what it does. `dec dword [rax]` subtracts 1 from ammo; `inc dword [rax]` adds 1."
+        },
+        {
+          "title": "Assembly and hex are the same thing",
+          "text": "The CPU runs bytes. Assembly is just a readable name for them: FF 08 is `dec dword [rax]` and FF 00 is `inc dword [rax]`. The editor shows both, so you can check that your change is exactly what you meant."
+        },
+        {
+          "title": "Why the size has to fit",
+          "text": "Both instructions are 2 bytes, so the new one fits exactly in place of the old one. A longer replacement would overwrite whatever instruction comes next and break the program; that's what hooks are for (Room 11).\n\n> In-place patches must be the same size or smaller. Smaller is padded with NOPs."
+        },
+        {
+          "title": "In real games",
+          "text": "Turning a subtract into an add, flipping a comparison, or changing a jump so a check always passes: these small in-place edits are the bread and butter of patching."
+        }
+      ]
     },
     {
       "id": 9,
@@ -486,7 +691,29 @@
           "see": "ID ACCEPTED: the gate opens. You're out."
         }
       ],
-      "learned": "You escaped the facility. Code holds secrets too: an access watch shows which instruction reads your data, and the instructions around it show what it compares against. The Advanced rooms ahead are optional."
+      "learned": "You escaped the facility. Code holds secrets too: an access watch shows which instruction reads your data, and the instructions around it show what it compares against. The Advanced rooms ahead are optional.",
+      "explain": [
+        {
+          "title": "The big idea",
+          "text": "Code doesn't only change data; it also reads and compares it. If you can find the code that reads your name, the instructions around it show exactly what it's comparing against, secret included."
+        },
+        {
+          "title": "Reads, not writes",
+          "text": "`Find out what accesses this address...` lists every instruction that reads or writes the callsign. Lots of code reads it (the game draws your name every frame), so you look for the row whose count only rises while you stand on the scan pad: that's the gate's scanner."
+        },
+        {
+          "title": "Reading text hidden in a number",
+          "text": "The scanner compares your name against `0x5245454E49474E45`. Those 8 bytes are letters, but x64 stores numbers lowest byte first (little-endian), so in memory they're 45 4E 47 49 4E 45 45 52. As ASCII that's E N G I N E E R.\n\n> When a number in code looks like 4x/5x/6x/7x bytes, try reading it backwards as text."
+        },
+        {
+          "title": "The rest of the check",
+          "text": "The next instructions also check that the byte after the name is zero (the name must end there) and that clearance at +0x20 equals 2. Matching all of it is what opens the gate. You didn't patch anything: reading the code was enough."
+        },
+        {
+          "title": "In real games",
+          "text": "Hidden passwords, unlock codes, difficulty checks and \"is this a debug build\" flags are all found this way: watch who reads the data, then read their comparisons."
+        }
+      ]
     },
     {
       "id": 10,
@@ -536,7 +763,25 @@
           "check": "complete"
         }
       ],
-      "learned": "A condition filters which executions you see; Pause on match lets you read registers at that exact moment."
+      "learned": "A condition filters which executions you see; Pause on match lets you read registers at that exact moment.",
+      "explain": [
+        {
+          "title": "The big idea",
+          "text": "The same code often runs for many objects. The press uses one damage routine for you and for the sentinel. To learn something only about your calls, you filter the watch with a condition."
+        },
+        {
+          "title": "Conditions",
+          "text": "`mem32(rax + 0x1C) == 1` reads the 4 bytes at rax + 0x1C (the faction field of whatever actor is being hit) and only matches when it's 1, the player. `Pause on match` freezes the whole game at that exact moment, so you can read the registers."
+        },
+        {
+          "title": "Registers carry data",
+          "text": "Functions receive their inputs in CPU registers. Here the routine is given a 4-digit code in r9 along with each hit, and only your hits carry the real one. The register view shows hex, so 0x1A2B becomes 6699 in decimal."
+        },
+        {
+          "title": "Why a patch here would hit both",
+          "text": "Filtering a watch only changes what you see. If you NOP'd this routine, the sentinel would become invulnerable too. Code that should only affect one object needs a check inside it, which is the next room.\n\n> Watches filter observations; they never limit what a patch affects."
+        }
+      ]
     },
     {
       "id": 11,
@@ -592,7 +837,25 @@
         }
       ],
       "learned": "A hook adds code without overwriting it: the original instruction moves into a trampoline. Insert before runs your code first; Replace selection drops the original, so you must include it yourself.",
-      "restore": "Restore original (or Patches → Restore all) before leaving."
+      "restore": "Restore original (or Patches → Restore all) before leaving.",
+      "explain": [
+        {
+          "title": "The big idea",
+          "text": "Sometimes you want to add behaviour, not just change one instruction. A hook replaces a few bytes with a jump to your own code, runs it, and jumps back."
+        },
+        {
+          "title": "How a hook works",
+          "text": "- The original instructions at the hook site are moved into a new block of memory (the trampoline).\n- The hook site becomes a jump to that block.\n- The block runs your code and the moved original instructions, then jumps back to just after the hook site.\n\n`Insert after` runs the original `dec` first and then your code. `Insert before` runs your code first. `Replace selection` drops the original, so your code must include it."
+        },
+        {
+          "title": "Your payload",
+          "text": "`cmp dword [rax + 0x18], 1` checks the faction of whoever is firing; `jne .done` skips the heal for anyone who isn't the player; `add dword [rax - 0x4], 5` adds 5 health. `pushfq`/`popfq` save and restore the CPU flags so the game never notices your comparison."
+        },
+        {
+          "title": "In real games",
+          "text": "Hooks are how mods add features: logging, custom rules, conditional cheats that affect only the player. The same idea underlies most game modding frameworks."
+        }
+      ]
     },
     {
       "id": 12,
@@ -641,7 +904,25 @@
           "check": "complete"
         }
       ],
-      "learned": "Stepping shows each decision as it happens; a trace records the whole path so you can compare runs."
+      "learned": "Stepping shows each decision as it happens; a trace records the whole path so you can compare runs.",
+      "explain": [
+        {
+          "title": "The big idea",
+          "text": "The vault checks three things and only says \"denied\". To see which check fails, you pause the game at the first check and step through the code one instruction at a time."
+        },
+        {
+          "title": "Compare and jump",
+          "text": "Decisions in code are a compare (`cmp`) followed by a conditional jump. The compare sets CPU flags; the jump goes elsewhere if the condition holds. Stepping with `Step into (F11)` shows which jump sends you to the rejection."
+        },
+        {
+          "title": "Traces",
+          "text": "A trace records every instruction one thread executes, with the registers before and after, and saves it as a CSV. Comparing a failing trace with a passing one is a powerful way to find what differs."
+        },
+        {
+          "title": "In real games",
+          "text": "License checks, anti-cheat decisions and \"can the player do this?\" logic are understood this way: break on the decision, step, and read the branches."
+        }
+      ]
     },
     {
       "id": 13,
@@ -688,7 +969,25 @@
         }
       ],
       "learned": "Absolute addresses die with the process. Module + offset (or a unique byte pattern) finds the same code in every new process.",
-      "restore": "Restore original (or Patches → Restore all) before leaving."
+      "restore": "Restore original (or Patches → Restore all) before leaving.",
+      "explain": [
+        {
+          "title": "The big idea",
+          "text": "A patch made by absolute address only works in the process you made it in. To reuse it, you save where it is in a way that survives a restart."
+        },
+        {
+          "title": "Module + offset and patterns",
+          "text": "`Module + offset` stores the patch as \"this executable, this many bytes in\", like the static pointer in Room 6. A `Module pattern` stores a unique sequence of bytes near the code and finds it again by searching. Patterns can survive small game updates that shift offsets."
+        },
+        {
+          "title": "Why ReClass checks the executable",
+          "text": "The saved definition remembers which executable it was made for (by hash). A different build has different code, so applying an old patch blindly could corrupt it. ReClass refuses instead of guessing."
+        },
+        {
+          "title": "In real games",
+          "text": "This is how trainers and saved cheat tables keep working across launches, and why they break after a game update."
+        }
+      ]
     }
   ]
 }

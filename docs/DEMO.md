@@ -56,7 +56,9 @@ step onto its START pad. A failure respawns ROOKIE with a one-line reason.
 The **Steps** drawer on the right (Tab hides it) shows the room's goal and a
 numbered checklist. Each step is one action tagged **IN GAME** or **IN RECLASS**,
 with exact ReClass labels shown as chips, one line on why it works, and what you
-should see afterwards. Shooting works in every room, so ROOKIE can always be found
+should see afterwards. **Explain** (next to Next room) opens a plain-language
+walkthrough of what the room teaches, how games actually store that kind of data,
+and how it carries over to real games. Shooting works in every room, so ROOKIE can always be found
 again through his ammo. Steps the game can observe (you fired,
 walked, stood on a pad, or a value changed from outside) tick themselves off; the
 others have a **Done** button. Finishing a room shows what you learned and a
