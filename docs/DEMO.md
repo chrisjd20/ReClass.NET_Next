@@ -8,20 +8,26 @@ discovering writers and readers, reading secrets out of code, editing assembly,
 preparing longer hooks, filtering watch events and reading captured registers,
 tracing, and saving reversible patches.
 
-| # | Room | What you bend |
-|---|---|---|
-| 1 | Drone Swarm | ammo int32 (exact scan) |
-| 2 | Cold Reactor | charge float32 (unknown / relative scans) |
-| 3 | Collapsing Bridge | speed float32, not position |
-| 4 | Blast Door | keycard byte and flag bits |
-| 5 | Biometric Gate | structure + enum; read the accepted callsign from the scanner's code via an access watch |
-| 6 | Armored Sentinels | pointer chain to the equipped weapon, across a reallocation |
-| 7 | Turret Nest | NOP the health writer, then restore |
-| 8 | Overclock | `dec` → `inc` assembly/hex edit |
-| 9 | Shared Machinery | filtered instruction watch; read the player-only override code from `r9d` |
-| 10 | Energy Siphon | conditional hook (three semantics) |
-| 11 | Decision Vault | stepping, tracing, CSV export |
-| 12 | Return Visit | saved definitions by module offset and signature across restarts |
+Rooms 0–9 are the main path; rooms 10–13 are an optional Advanced chapter. Each
+room teaches one technique, and later rooms reuse the ROOKIE class you build in
+Room 3.
+
+| # | Room | Chapter | Technique |
+|---|---|---|---|
+| 0 | Attach | Getting started | attach ReClass, open the Scanner |
+| 1 | Drone Swarm | Scanning | exact-value int scan (ammo) |
+| 2 | Cold Reactor | Scanning | `Is Between 5–100`, then increased/decreased/unchanged |
+| 3 | Collapsing Bridge | Structures | find ammo, open a class at ammo − 4, read speed beside it |
+| 4 | Blast Door | Structures | byte and bit-flag edits that preserve other bits |
+| 5 | Armored Sentinels | Pointers | follow pointers across a reallocation |
+| 6 | Static Root | Pointers | pointer scan to a module-static root; `[<module>+offset]` class |
+| 7 | Turret Nest | Code | find what writes, NOP, restore |
+| 8 | Overclock | Code | `dec` → `inc` instruction edit |
+| 9 | Biometric Gate | Code | find what reads; read a secret immediate from code |
+| 10 | Shared Machinery | Advanced (optional) | conditional watch, Pause on match, read `r9` |
+| 11 | Energy Siphon | Advanced (optional) | conditional hook (Insert after) |
+| 12 | Decision Vault | Advanced (optional) | step into, trace, CSV export |
+| 13 | Return Visit | Advanced (optional) | saved patch definitions across a restart |
 
 ## Start
 
@@ -39,57 +45,33 @@ Read the included `Demo/GUIDE.html` or `Demo/GUIDE.md` for the complete walkthro
 The game and these guides are generated from the same lesson content. Keep the
 guide open when using debugger pause: suspending the process also stops its UI.
 
-## Practice at your own pace
+## Playing
 
-The game view fills most of the window: a top-down facility room with pixel-art
-sprites, an in-game HUD (health, ammo, room gauges, status line) and a hotbar of
-the room's controlled actions, each with its Ctrl shortcut. The Mission drawer
-on the right holds the objective, the current step, hints, solutions and restore
-reminders; **Tab** collapses it for a larger game view.
+The game runs in real time and nothing hurts you unless you walk into it. Move
+with WASD, aim with the mouse, click or press Space to shoot, and press **E** at
+glowing consoles. Pads act while you stand on them (charge pad, scan pad, the
+press plate, the turret zone). Room 3's run starts with a 3-2-1 countdown when you
+step onto its START pad. A failure respawns ROOKIE with a one-line reason.
 
-Each room starts with its simulation paused. Values stay live while paused, so
-an external edit is immediately observable: any value that changes from outside
-the game flashes violet in the game view as **MEMORY WRITE DETECTED** (old → new
-value) and is counted in the room banner. Fire once, Take one hit, Recharge once,
-Swap weapon and similar hotbar actions are deliberate single actions; **Tick +1**
-runs exactly one simulation step. Movement, timers and automatic damage stop
-while paused; the game pauses on losing focus and stays paused when focus
-returns.
+The **Steps** drawer on the right (Tab hides it) shows the room's goal and a
+numbered checklist. Each step is one action tagged **IN GAME** or **IN RECLASS**,
+with exact ReClass labels shown as chips, one line on why it works, and what you
+should see afterwards. Shooting works in every room, so ROOKIE can always be found
+again through his ammo. Steps the game can observe (you fired,
+walked, stood on a pad, or a value changed from outside) tick themselves off; the
+others have a **Done** button. Finishing a room shows what you learned and a
+**Next room** button. Rooms 4 and later include a collapsible **Find ROOKIE
+again** recipe for a fresh ReClass session.
 
-Movement uses WASD or the arrow keys. Aim with the mouse; clicking or Space fires
-inside the game view. Clicking hotbar or drawer controls never fires. Closed
-doors in Rooms 4, 5 and 11 block movement until the door decision opens them.
-
-**Show debug readout** (in the Mission drawer or Help) adds a **Memory** tab
-with field types, exact values, **Reveal address** (current addresses, pointer
-paths and module offsets) and **Hex values**. It is off by default so the lessons
-lead with ReClass; using it has no penalty. Copy values for float scans instead
-of rounding the displayed number. Hints and full solutions are available at any
-time, and Back/Next never depend on an automatic detector.
-
-Instructions use an embedded readable sans-serif font, numbers a monospace font,
-and branding and headings keep their pixel style. The interface scales with
-larger windows; A-/A+ adjusts the reading size. Help toggles the optional CRT
-effect (scanlines, vignette and a glitch on memory edits).
-
-Observed completion records an outcome, not proof of which editing method was
-used. Structure saving (Room 5), trace export (Room 11) and the restart (Room 12)
-include manual acknowledgements (Ctrl+M). Local progress stores tutorial
-position, completion and display preferences; addresses and modified game state
-are never saved as progress.
-
-Normal recharge and passive regeneration in Room 2 stop at 60, below the reactor's
-90 threshold. Room 4's **Invalidate keycard** and **Cut power bit** controls only
-revoke access; granting the keycard and power requires editing memory. Room 5's
-accepted callsign is not written anywhere in the lessons: it exists only as an
-immediate operand in the scanner routine, which reads your callsign every tick
-while you stand on the SCAN PAD. Room 9 generates a new four-digit override code
-at every reset and passes it to the shared damage routine in `r9d` only for the
-player's hits (the sentinel's hits carry a decoy); **Submit override** checks the
-player's clearance against it, so the room no longer relies on self-reporting.
-
-Loading older progress clears only badges whose rules changed: Rooms 2 and 4
-(version 1) and Rooms 5 and 9 (version 2).
+Rooms open in order: completing a room (which always takes real memory work:
+an edit, a patch, a hook or a watch) opens the next one, and completed rooms stay
+open. A completed room shows **Next room** in the drawer and the HUD. Every step
+can be done with ReClass alone; the drawer's **Memory** tab shows live values,
+addresses and teaching sites as an answer key. Values changed
+from outside the process flash violet as **MEMORY WRITE DETECTED**. Escape opens
+the room select (F1–F12 rooms 1–12, Shift+F1 room 13, Shift+F12 room 0; locked
+rooms stay closed). Restart
+room (Ctrl+R) resets gameplay data only.
 
 ## Restore patches before moving on
 
@@ -98,9 +80,9 @@ code. Use ReClass's **Restore original** or **Restore all** before leaving a
 patching exercise. Restarting the game creates a fresh process and discards its
 old hook allocations.
 
-Rooms 7, 8 and 10 explicitly teach restoration as part of the exercise. Room 9
-demonstrates that filtering a watch limits the events you see; a player-only patch
-requires an object check in the replacement code. Room 12 teaches that saved
+Rooms 7, 8, 11 and 13 explicitly teach restoration as part of the exercise. Room
+10 demonstrates that filtering a watch limits the events you see; a player-only
+patch requires an object check in the replacement code (Room 11). Room 13 teaches that saved
 definitions load inactive and must resolve and be explicitly applied again.
 
 Windows and Linux executables have different code layouts and image identities.
@@ -125,7 +107,8 @@ it never changes the host's ptrace policy.
 `--self-check` runs a small window-free sanity batch. For screenshots during
 development set `RECLASS_BREAKOUT_CAPTURE=shot.ppm` (optionally
 `RECLASS_BREAKOUT_CAPTURE_FRAME=N`, default 90): the game saves that frame as a
-binary PPM and exits. Use it at the final integrated
+binary PPM and exits. `--unlock-all` opens every room for development and the
+acceptance harness. Use it at the final integrated
 checkpoint together with the focused real-provider walkthrough. The full legacy
 suite, repeated debugger checks and distribution matrix are not required for this
 demo. Actual runtime results belong in `docs/DEMO_VALIDATION.md`.

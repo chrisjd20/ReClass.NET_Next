@@ -56,14 +56,14 @@ internal static class RuntimeWalkthrough
             int from = 1;
             bool resumeOnly = args.Contains("--resume-only");
             Check(!resumeOnly || !args.Any(a => a.StartsWith("--from=")), "--resume-only cannot be combined with --from.");
-            foreach (var option in args.Where(a => a.StartsWith("--from="))) Check(int.TryParse(option.Substring(7), out from) && from >= 1 && from <= 12, "--from must be 1..12");
+            foreach (var option in args.Where(a => a.StartsWith("--from="))) Check(int.TryParse(option.Substring(7), out from) && from >= 1 && from <= 13, "--from must be 1..13");
             var positional = args.Where(a => a != "--resume-only" && !a.StartsWith("--from=")).ToArray();
             Check(positional.Length >= 1 && positional.Length <= 2 && positional.All(a => !a.StartsWith("--")), "Usage: RuntimeWalkthrough [--from=N | --resume-only] <packaged-game> [evidence-prefix]");
             var evidence = positional.Length == 2 ? Path.GetFullPath(positional[1]) : Path.Combine(Path.GetTempPath(), "breakout-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(Path.GetDirectoryName(evidence));
             if (resumeOnly) RunResumeOnly(Path.GetFullPath(positional[0])).GetAwaiter().GetResult();
             else Run(Path.GetFullPath(positional[0]), evidence, from).GetAwaiter().GetResult();
-            Console.WriteLine(resumeOnly ? "PASS focused continuously running Breakout debugger resume; campaign not repeated" : "PASS packaged Breakout actual ReClass service acceptance rooms=" + from + "..12");
+            Console.WriteLine(resumeOnly ? "PASS focused continuously running Breakout debugger resume; campaign not repeated" : "PASS packaged Breakout actual ReClass service acceptance rooms=" + from + "..13");
             Console.WriteLine("SCOPE: platform game input and native ReClass services; manual ReClass GUI controls/readability require the companion checklist.");
             return 0;
         } catch (Exception e) { Console.Error.WriteLine("FAIL Breakout acceptance: " + e); return 1; }
@@ -80,7 +80,7 @@ internal static class RuntimeWalkthrough
             using (var w = new DebugWorkspace(process, project)) {
                 w.Session.Diagnostic += message => Console.Error.WriteLine("Debugger: " + message);
                 await Timed(w.Session.AttachAsync(), "Focused resume attach");
-                await c.Room(3); await c.Action("y"); await c.Action("p");
+                await c.Freeze(); await c.Room(3); await c.Action("y"); await c.Action("p");
                 Check(c.Last["paused"] == "0", "Focused trial simulation did not resume.");
                 ulong timerAddress = Pointer(w, c.Root) + 28;
                 float runningStart = Float(w, timerAddress);
@@ -131,18 +131,20 @@ internal static class RuntimeWalkthrough
                     Check(Pointer(w, Pointer(w, child.Root)) == child.Player, "World root/player pointer path differs from advertised identity.");
                     Check(Pointer(w, Pointer(w, child.Root) + 8) == child.Enemy, "World enemy pointer array differs.");
                     Check(Int(w, child.Player + Faction) == 1 && Int(w, child.Enemy + Faction) == 2, "Actor factions/layout differ.");
+                    await child.Freeze();
                     if (from <= 1) await Room1(w, child);
                     if (from <= 2) await Room2(w, child);
                     if (from <= 3) await Room3(w, child);
                     if (from <= 4) await Room4(w, child);
-                    if (from <= 5) await Room5(w, child, evidence);
+                    if (from <= 5) await Room5(w, child);
                     if (from <= 6) await Room6(w, child);
                     if (from <= 7) await Room7(w, child);
                     if (from <= 8) await Room8(w, child);
-                    if (from <= 9) await Room9(w, child);
+                    if (from <= 9) await Room9(w, child, evidence);
                     if (from <= 10) await Room10(w, child);
-                    if (from <= 11) await Room11(w, child, evidence);
-                    await child.Room(12);
+                    if (from <= 11) await Room11(w, child);
+                    if (from <= 12) await Room12(w, child, evidence);
+                    await child.Room(13);
                     archive = await SaveDefinitions(w, child, evidence);
                     await Timed(w.Session.DetachAsync(), "Detach before restart");
                     await child.Exit();
@@ -157,58 +159,101 @@ internal static class RuntimeWalkthrough
         // exercises real scanner clipping without broad historical stress work.
         return new Scanner(w.Process, new ScanSettings { StartAddress = Ptr(child.Player), StopAddress = Ptr(child.Player + 71), ValueType = type, FastScanAlignment = 4, ScanCopyOnWriteMemory = SettingState.Indeterminate, ScanMappedMemory = true });
     }
-    static async Task Search(Scanner scanner, IScanComparer comparer) { Check(await Timed(scanner.Search(comparer, null, CancellationToken.None), "Real scanner pass"), "Real scanner did not finish successfully."); }
+    static async Task Search(Scanner scanner, IScanComparer comparer)
+    {
+        // Whole-process scans can take far longer than the UI-action timeout.
+        var pass = scanner.Search(comparer, null, CancellationToken.None);
+        if (await Task.WhenAny(pass, Task.Delay(180000)) != pass) throw new TimeoutException("Real scanner pass");
+        Check(await pass, "Real scanner did not finish successfully.");
+    }
     static void Found(Scanner scanner, ulong address) { Check(scanner.GetResults().Any(r => unchecked((ulong)r.Address.ToInt64()) == address), "Scanner did not retain expected actual field."); Check(scanner.GetResults().All(r => unchecked((ulong)r.Address.ToInt64()) >= unchecked((ulong)scanner.Settings.StartAddress.ToInt64()) && unchecked((ulong)r.Address.ToInt64()) <= unchecked((ulong)scanner.Settings.StopAddress.ToInt64())), "Scan escaped requested target range."); }
     static FloatMemoryComparer FC(ScanCompareType mode, float value = 0) => new FloatMemoryComparer(mode, ScanRoundMode.Strict, 6, value, value, Endian);
     static async Task Complete(Child child, int room) { Check(child.Last.ContainsKey("complete") && child.Last["complete"] == "1", "Room " + room + " outcome not observed: " + child.LastLine); Console.WriteLine("PASS room=" + room + " " + child.LastLine); await Task.CompletedTask; }
+    // Lesson scans run over the whole process with the Scanner's default settings, exactly
+    // as a player would, so decoys created by the game itself are counted.
+    static Scanner WholeProcess(DebugWorkspace w, ScanValueType type) => new Scanner(w.Process, new ScanSettings { ValueType = type });
+    static int Count(Scanner scanner) => scanner.TotalResultCount;
+    static async Task<ulong> FindAmmo(DebugWorkspace w, Child c, string room)
+    {
+        // The "Find ROOKIE" recipe: shoot, exact scan, shoot, next scan -> one result.
+        using (var scanner = WholeProcess(w, ScanValueType.Integer)) {
+            await c.Action("f"); int ammo = Int(w, c.Player + Ammo);
+            await Search(scanner, new IntegerMemoryComparer(ScanCompareType.Equal, ammo, ammo, Endian));
+            int first = Count(scanner);
+            ulong[] left = new ulong[0]; int rounds = 0;
+            // The lesson: shoot and Next Scan again until one result is left (at most three rounds).
+            do {
+                await c.Action("f"); ammo = Int(w, c.Player + Ammo); ++rounds;
+                await Search(scanner, new IntegerMemoryComparer(ScanCompareType.Equal, ammo, ammo, Endian));
+                left = scanner.GetResults().Select(r => unchecked((ulong)r.Address.ToInt64())).ToArray();
+            } while (left.Length > 1 && rounds < 3);
+            Console.WriteLine("CONVERGE room=" + room + " recipe=ammo-exact first=" + first + " rounds=" + rounds + " left=" + left.Length);
+            foreach (var address in left) {
+                var section = w.Process.Sections.FirstOrDefault(x => address >= unchecked((ulong)x.Start.ToInt64()) && address < unchecked((ulong)x.End.ToInt64()));
+                Console.WriteLine("  RESULT 0x" + address.ToString("X") + (address == c.Player + Ammo ? " (real)" : "") + " section=" + (section == null ? "none" : section.Type + "/" + section.Category + "/" + section.ModuleName + " " + section.Start.ToString("X")) +
+                    " around=" + BitConverter.ToString(w.Target.ReadExact(address - 16, 32)));
+            }
+            Check(left.Length == 1 && left[0] == c.Player + Ammo, "Ammo scan did not converge to the single real field: " + left.Length + " results.");
+            return left[0];
+        }
+    }
     static async Task Room1(DebugWorkspace w, Child c)
     {
         await c.Room(1);
-        using (var scanner = Scan(w, c, ScanValueType.Integer)) {
-            await Search(scanner, new IntegerMemoryComparer(ScanCompareType.Equal, 12, 12, Endian)); Found(scanner, c.Player + Ammo);
-            await c.Action("f"); Check(Int(w, c.Player + Ammo) == 11, "Fire once did not consume exactly one round.");
-            await Search(scanner, new IntegerMemoryComparer(ScanCompareType.Equal, 11, 11, Endian)); Found(scanner, c.Player + Ammo);
-            await c.Action("r"); await WriteInt(w, c.Player + Ammo, 30);
-            await Task.Delay(100); Check(Int(w, c.Player + Ammo) == 30 && c.Last["paused"] == "1", "Paused edit was overwritten.");
-            for (int i = 0; i < 20; ++i) await c.Action("f");
-            Check(Int(w, c.Player + Ammo) == 10, "Twenty exact actions did not consume twenty rounds.");
-        }
+        ulong ammo = await FindAmmo(w, c, "1");
+        await WriteInt(w, ammo, 30);
+        await Task.Delay(100); Check(Int(w, c.Player + Ammo) == 30 && c.Last["paused"] == "1", "Paused edit was overwritten.");
+        for (int i = 0; i < 20; ++i) await c.Action("f");
+        Check(Int(w, c.Player + Ammo) == 10, "Twenty exact actions did not consume twenty rounds.");
         await Complete(c, 1);
     }
     static async Task Room2(DebugWorkspace w, Child c)
     {
         await c.Room(2);
-        using (var scanner = Scan(w, c, ScanValueType.Float)) {
-            await Search(scanner, FC(ScanCompareType.Unknown)); Found(scanner, c.Player + Charge);
-            float before = Float(w, c.Player + Charge); await c.Action("b"); Check(Float(w, c.Player + Charge) == before + 5, "Recharge action count.");
-            await Search(scanner, FC(ScanCompareType.Increased)); Found(scanner, c.Player + Charge);
-            await c.Action("d"); await Search(scanner, FC(ScanCompareType.Decreased)); Found(scanner, c.Player + Charge);
-            await Search(scanner, FC(ScanCompareType.NotChanged)); Found(scanner, c.Player + Charge);
+        using (var scanner = WholeProcess(w, ScanValueType.Float)) {
+            await Search(scanner, new FloatMemoryComparer(ScanCompareType.Between, ScanRoundMode.Strict, 6, 5, 100, Endian)); Found(scanner, c.Player + Charge);
+            var counts = new List<int> { Count(scanner) };
+            for (int round = 0; round < 3; ++round) {
+                await c.Action("b"); await Search(scanner, FC(ScanCompareType.Increased)); Found(scanner, c.Player + Charge);
+                await c.Action("d"); await Search(scanner, FC(ScanCompareType.Decreased)); Found(scanner, c.Player + Charge);
+                await Search(scanner, FC(ScanCompareType.NotChanged)); Found(scanner, c.Player + Charge);
+                counts.Add(Count(scanner));
+            }
+            Console.WriteLine("CONVERGE room=2 recipe=between-then-relative results-per-round=" + string.Join(",", counts));
+            foreach (var address in scanner.GetResults().Select(r => unchecked((ulong)r.Address.ToInt64())).Take(40)) {
+                var section = w.Process.Sections.FirstOrDefault(x => address >= unchecked((ulong)x.Start.ToInt64()) && address < unchecked((ulong)x.End.ToInt64()));
+                Console.WriteLine("  RESULT 0x" + address.ToString("X") + (address == c.Player + Charge ? " (real)" : "") + " value=" + Float(w, address) + " section=" + (section == null ? "none" : section.Type + "/" + section.Category + "/" + section.ModuleName + " " + section.Start.ToString("X") + "-" + section.End.ToString("X")));
+            }
+            Check(counts.Last() <= 10, "Room 2 relative scans did not converge to a handful of results.");
             await WriteFloat(w, c.Player + Charge, 95); await c.Action("o");
         }
         await Complete(c, 2);
     }
     static async Task Room3(DebugWorkspace w, Child c)
     {
+        // The lesson: find ammo, open a class at ammo - 4, read speed at +8.
         await c.Room(3);
-        using (var scanner = Scan(w, c, ScanValueType.Float)) { await Search(scanner, FC(ScanCompareType.Equal, 60)); Found(scanner, c.Player + Speed); }
-        Check(Float(w, c.Player + X) == 70 && Float(w, c.Player + Y) != Float(w, c.Player + Speed), "Adjacent position fields indistinguishable.");
-        await WriteFloat(w, c.Player + Speed, 6000); await c.Action("y");
+        ulong ammo = await FindAmmo(w, c, "3");
+        ulong rookie = ammo - 4;
+        Check(rookie == c.Player && Int(w, rookie + Health) == 100, "Class at ammo - 4 is not ROOKIE.");
+        Check(Float(w, rookie + Speed) == 60, "Row 0008 of the class is not speed 60.");
+        await WriteFloat(w, rookie + Speed, 6000); await c.Action("y");
         await c.HoldRight(true);
         try { for (int i = 0; i < 6; ++i) await c.Action("t"); } finally { await c.HoldRight(false); }
         Check(Float(w, c.Player + X) >= 650, "Edited speed did not move player through trial."); await Complete(c, 3);
     }
     static async Task Room4(DebugWorkspace w, Child c)
     {
-        await c.Room(4); await c.Action("k"); await c.Action("g"); await c.Action("a");
-        int originalFlags = Int(w, c.Player + Flags);
-        await Write(w, c.Player + Keycard, new byte[] { 1 }); await WriteInt(w, c.Player + Flags, (originalFlags | 1) & ~2);
-        Check((Int(w, c.Player + Flags) & ~3) == (originalFlags & ~3), "Unrelated flag bits changed.");
+        await c.Room(4); Check(Int(w, c.Player + Flags) == 0x82, "Blast door flags do not start with maintenance and alarm bits.");
+        await c.Action("a"); Check(Int(w, c.Player + Flags) == 0x80, "Alarm switch changed more than bit 1.");
+        await c.Action("o"); Check(c.Last["complete"] == "0", "Door opened without edits.");
+        await WriteInt(w, c.Player + Flags, 1); await c.Action("o"); Check(c.Last["complete"] == "0", "Door ignored the cleared maintenance bit.");
+        await Write(w, c.Player + Keycard, new byte[] { 1 }); await WriteInt(w, c.Player + Flags, 0x81);
         await c.Action("o"); await Complete(c, 4);
     }
-    static async Task Room5(DebugWorkspace w, Child c, string evidence)
+    static async Task Room9(DebugWorkspace w, Child c, string evidence)
     {
-        await c.Room(5);
+        await c.Room(9);
         var clearance = new EnumDescription { Name = "Clearance" }; clearance.SetData(false, EnumDescription.UnderlyingTypeSize.FourBytes, new[] { new KeyValuePair<string,long>("Rookie", 0), new KeyValuePair<string,long>("Engineer", 2) }); w.Project.AddEnum(clearance);
         var actor = ClassNode.Create(); actor.Name = "BreakoutActor"; actor.AddressFormula = c.Player.ToString("X");
         var enumNode = new EnumNode { Name = "clearance" }; enumNode.ChangeEnum(clearance);
@@ -224,16 +269,48 @@ internal static class RuntimeWalkthrough
         var compare = w.Instructions.Decode(w.Target.ReadExact(c.BadgeSite, 10), c.BadgeSite); Check(compare.Success && compare.Instructions.Count == 1 && compare.Instructions[0].Text.ToUpperInvariant().Contains("5245454E49474E45"), "Badge compare immediate differs.");
         Check(c.Last["primary"] == "0", "Unedited badge opened the gate.");
         byte[] text = new byte[24]; Encoding.ASCII.GetBytes("ENGINEER").CopyTo(text, 0); await Write(w, c.Player + Callsign, text); await WriteInt(w, c.Player + Clearance, 2);
-        await c.Action("o"); await c.Action("m"); await Complete(c, 5);
-        Console.WriteLine("MANUAL room=5 acknowledgement follows actual service archive save/reopen; GUI project buttons remain checklist items.");
+        await c.Action("o"); await Complete(c, 9);
     }
-    static async Task Room6(DebugWorkspace w, Child c)
+    static async Task Room5(DebugWorkspace w, Child c)
     {
-        await c.Room(6); ulong inventory = Pointer(w, c.Player + Inventory), equipped = Pointer(w, inventory + 16);
+        await c.Room(5); ulong inventory = Pointer(w, c.Player + Inventory), equipped = Pointer(w, inventory + 16);
         Check(new[] { Pointer(w, inventory), Pointer(w, inventory + 8) }.Contains(equipped), "Equipped pointer is not one of inventory array slots.");
         await WriteInt(w, equipped + 24, 50); await c.Action("f"); await c.Action("w");
         ulong replacement = Pointer(w, inventory + 16); Check(replacement != equipped && new[] { Pointer(w, inventory), Pointer(w, inventory + 8) }.Contains(replacement), "Explicit swap did not replace/reacquire array object.");
-        await WriteInt(w, replacement + 24, 50); await c.Action("f"); await Complete(c, 6);
+        await WriteInt(w, replacement + 24, 50); await c.Action("f"); await Complete(c, 5);
+    }
+    static async Task Room6(DebugWorkspace w, Child c)
+    {
+        // Pointer scan: Actor -> World (heap) -> module-static root, then follow the root across relocations.
+        await c.Room(6);
+        ulong world;
+        using (var scanner = new Scanner(w.Process, new ScanSettings { ValueType = ScanValueType.Long, FastScanAlignment = 8 })) {
+            await Search(scanner, new LongMemoryComparer(ScanCompareType.Equal, (long)c.Player, (long)c.Player, Endian));
+            var worlds = scanner.GetResults().Select(r => unchecked((ulong)r.Address.ToInt64())).Where(a => { try { return Int(w, a + 24) == 6; } catch { return false; } }).ToArray();
+            ulong expected = Pointer(w, c.Root);
+            if (!worlds.Contains(expected)) {
+                var section = w.Process.Sections.FirstOrDefault(x => expected >= unchecked((ulong)x.Start.ToInt64()) && expected < unchecked((ulong)x.End.ToInt64()));
+                Console.Error.WriteLine("ROOM6 results=" + scanner.TotalResultCount + " candidates=" + string.Join(",", worlds.Select(a => "0x" + a.ToString("X"))) + " expected=0x" + expected.ToString("X") +
+                    " section=" + (section == null ? "none" : section.Type + "/" + section.Protection + "/" + section.Category + " " + section.Start.ToString("X") + "-" + section.End.ToString("X")));
+            }
+            Check(worlds.Contains(expected), "The pointer scan did not find the World that the root points at.");
+            world = expected;
+        }
+        using (var scanner = new Scanner(w.Process, new ScanSettings { ValueType = ScanValueType.Long, FastScanAlignment = 8 })) {
+            await Search(scanner, new LongMemoryComparer(ScanCompareType.Equal, (long)world, (long)world, Endian));
+            var module = w.Target.Modules.Single(m => c.Root >= m.BaseAddress && c.Root - m.BaseAddress < m.Size);
+            var statics = scanner.GetResults().Select(r => unchecked((ulong)r.Address.ToInt64())).Where(a => a >= module.BaseAddress && a - module.BaseAddress < module.Size).ToArray();
+            Check(statics.Length == 1 && statics[0] == c.Root, "Module-static scan did not find exactly the advertised root.");
+            Console.WriteLine("STATIC root=<" + module.Name + ">+0x" + (c.Root - module.BaseAddress).ToString("X"));
+        }
+        var seen = new HashSet<ulong>();
+        for (int link = 1; link <= 3; ++link) {
+            ulong current = Pointer(w, c.Root); Check(seen.Add(current), "Relay reboot did not move the control block.");
+            await WriteFloat(w, current + 32, 100); await c.Action("t");
+            Check(c.Last["links"] == link.ToString(CultureInfo.InvariantCulture), "Relay link not counted: " + c.LastLine);
+            if (link < 3) await c.Action("n");
+        }
+        await Complete(c, 6);
     }
     static PatchDefinition Definition(DebugWorkspace w, ulong site, int length, string assembly, BoundarySource boundary = BoundarySource.Execution) => new PatchDefinition { Name = "Breakout acceptance", SourceKind = PatchSourceKind.Assembly, Assembly = assembly, LocatorKind = PatchLocatorKind.SessionAddress, SessionId = w.Session.Id, SessionAddress = site, Platform = w.Target.Platform, SelectionLength = length, ExpectedBytes = w.Target.ReadExact(site, length), Boundary = boundary };
     static async Task Confirm(DebugWorkspace w, Child c, ulong data, ulong site, string action)
@@ -278,9 +355,9 @@ internal static class RuntimeWalkthrough
         await Apply(w, preview); try { for (int i = 0; i < 3; ++i) await c.Action("f"); Check(Int(w, c.Player + Ammo) == 15, "Three actual shots did not increase ammo to fifteen."); } finally { await Restore(w, definition); }
         await c.Action("f"); Check(Int(w, c.Player + Ammo) == 14, "Restored decrement failed."); await Complete(c, 8);
     }
-    static async Task Room9(DebugWorkspace w, Child c)
+    static async Task Room10(DebugWorkspace w, Child c)
     {
-        await c.Room(9); var hits = new ConcurrentBag<WatchHit>(); var watch = await w.Session.StartInstructionWatchAsync(c.Damage, hits.Add);
+        await c.Room(10); var hits = new ConcurrentBag<WatchHit>(); var watch = await w.Session.StartInstructionWatchAsync(c.Damage, hits.Add);
         try { await c.Action("h"); await c.Action("j"); await Until(() => hits.Count >= 2, "Shared writer operands"); var addresses = hits.SelectMany(h => w.Instructions.ResolveMemoryAddresses(h.Candidates.Single(), h.Snapshot.Registers)).Where(m => m.Available).Select(m => m.Address).Distinct().ToArray(); Check(addresses.Contains(c.Player) && addresses.Contains(c.Enemy), "Shared code did not discover both actual actor addresses."); }
         finally { await w.Session.StopWatchAsync(watch.Id); }
         uint code = 0;
@@ -294,11 +371,11 @@ internal static class RuntimeWalkthrough
             Check(c.Last["paused"] == "1", "Simulation pause was lost across debugger stop.");
         } finally { if (watch != null) await w.Session.StopWatchAsync(watch.Id); if (w.Session.State == DebugSessionState.Paused) await w.Session.ResumeAsync(); }
         await c.Action("o"); Check(c.Last["complete"] == "0", "Unedited clearance unlocked the press.");
-        await WriteInt(w, c.Player + Clearance, (int)code); await c.Action("o"); await Complete(c, 9);
+        await WriteInt(w, c.Player + Clearance, (int)code); await c.Action("o"); await Complete(c, 10);
     }
-    static async Task Room10(DebugWorkspace w, Child c)
+    static async Task Room11(DebugWorkspace w, Child c)
     {
-        await c.Room(10); await Confirm(w, c, c.Player + Ammo, c.AmmoSite, "f"); await c.Action("r");
+        await c.Room(11); await Confirm(w, c, c.Player + Ammo, c.AmmoSite, "f"); await c.Action("r");
         string healing = "pushfq\ncmp dword [rax + 24], 1\njne no_heal\nadd dword [rax - 4], byte 5\nno_heal:\npopfq";
         foreach (var mode in new[] { HookSemanticMode.InsertBefore, HookSemanticMode.ReplaceSelection }) {
             var variant = Definition(w, c.AmmoSite, 2, mode == HookSemanticMode.ReplaceSelection ? "dec dword [rax]\n" + healing : healing); variant.Mode = PatchMode.Hook; variant.HookMode = mode;
@@ -315,11 +392,11 @@ internal static class RuntimeWalkthrough
             int enemyAmmo = Int(w, c.Enemy + Ammo), enemyHealth = Int(w, c.Enemy), playerHealth = Int(w, c.Player);
             await c.Action("e"); Check(Int(w, c.Enemy + Ammo) == enemyAmmo - 1 && Int(w, c.Enemy) == enemyHealth && Int(w, c.Player) == playerHealth, "Enemy firing leaked healing.");
         } finally { await Restore(w, definition); }
-        await c.Action("f"); Check(Int(w, c.Player) == 55 && Int(w, c.Player + Ammo) == 10, "Restored shared fire behavior differs."); await Complete(c, 10);
+        await c.Action("f"); Check(Int(w, c.Player) == 55 && Int(w, c.Player + Ammo) == 10, "Restored shared fire behavior differs."); await Complete(c, 11);
     }
-    static async Task Room11(DebugWorkspace w, Child c, string evidence)
+    static async Task Room12(DebugWorkspace w, Child c, string evidence)
     {
-        await c.Room(11); var captured = new TaskCompletionSource<WatchHit>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await c.Room(12); var captured = new TaskCompletionSource<WatchHit>(TaskCreationOptions.RunContinuationsAsynchronously);
         var watch = await w.Session.StartInstructionWatchAsync(c.VaultEntry, h => captured.TrySetResult(h), "", true);
         var action = c.Action("o");
         try {
@@ -331,8 +408,7 @@ internal static class RuntimeWalkthrough
             Console.WriteLine("TRACE entries=" + trace.Entries.Count + " stop=" + trace.StopReason + " endpoint=0x" + c.VaultEnd.ToString("X") + " csv=" + evidence + "-vault.csv");
             await w.Session.ResumeAsync(); await Timed(action, "Complete traced door action");
         } finally { if (watch != null) await w.Session.StopWatchAsync(watch.Id); if (w.Session.State == DebugSessionState.Paused) await w.Session.ResumeAsync(); }
-        await Write(w, c.Player + Keycard, new byte[] { 1 }); await WriteInt(w, c.Player + Clearance, 2); await WriteInt(w, c.Player + Flags, Int(w, c.Player + Flags) & ~2); await c.Action("o"); await c.Action("m"); await Complete(c, 11);
-        Console.WriteLine("MANUAL room=11 acknowledgement follows real service trace/export; GUI Trace/Export buttons remain checklist items.");
+        await Write(w, c.Player + Keycard, new byte[] { 1 }); await WriteInt(w, c.Player + Clearance, 2); await WriteInt(w, c.Player + Flags, Int(w, c.Player + Flags) & ~2); await c.Action("o"); await Complete(c, 12);
     }
     static async Task<byte[]> SaveDefinitions(DebugWorkspace w, Child c, string evidence)
     {
@@ -349,20 +425,20 @@ internal static class RuntimeWalkthrough
     }
     static async Task Restart(CoreFunctionsManager core, string executable, byte[] archive)
     {
-        using (var c = new Child(executable, 12))
+        using (var c = new Child(executable, 13))
         using (var process = new RemoteProcess(core))
         using (var project = new ReClassNetProject()) {
             await c.Identity(); using (var stream = new MemoryStream(archive)) new ReClassNetFile(project).Load(stream, new NullLogger());
             process.Open(new ProcessInfo(Ptr((ulong)c.Pid), Path.GetFileName(executable), executable)); await process.UpdateProcessInformationsAsync();
             using (var w = new DebugWorkspace(process, project)) {
-                await Timed(w.Session.AttachAsync(), "Attach restarted same executable"); await c.Room(12); Check(w.Repository.Definitions.Count == 2 && w.Manager.ActivePatches.Count == 0 && w.Target.ReadExact(c.AmmoSite, 2).SequenceEqual(new byte[] { 0xff, 0x08 }), "Loaded definitions auto-applied or archive lost definitions.");
+                await Timed(w.Session.AttachAsync(), "Attach restarted same executable"); await c.Freeze(); await c.Room(13); Check(w.Repository.Definitions.Count == 2 && w.Manager.ActivePatches.Count == 0 && w.Target.ReadExact(c.AmmoSite, 2).SequenceEqual(new byte[] { 0xff, 0x08 }), "Loaded definitions auto-applied or archive lost definitions.");
                 var resolver = new PatchTargetResolver();
                 foreach (var saved in w.Repository.Definitions.ToArray()) {
                     var resolved = resolver.Resolve(saved, w.Target, CancellationToken.None); Check(resolved.Status == PatchResolutionStatus.Resolved && resolved.Address == c.AmmoSite, "Saved locator did not resolve actual restarted teaching site: " + resolved.Message);
-                    await c.Action("r"); await c.Action("m"); var preview = await w.Planner.PreviewAsync(saved, w.Target); await Apply(w, preview);
+                    await c.Action("r"); var preview = await w.Planner.PreviewAsync(saved, w.Target); await Apply(w, preview);
                     try { for (int i = 0; i < 3; ++i) await c.Action("f"); Check(Int(w, c.Player + Ammo) == 15, "Saved patch did not produce incremented ammo."); }
                     finally { Check((await w.Manager.RestoreAsync(saved.Id)).Success, "Saved patch restoration failed."); }
-                    await c.Action("f"); Check(Int(w, c.Player + Ammo) == 14 && w.Target.ReadExact(c.AmmoSite, 2).SequenceEqual(saved.ExpectedBytes), "Saved restoration did not return original firing."); await Complete(c, 12);
+                    await c.Action("f"); Check(Int(w, c.Player + Ammo) == 14 && w.Target.ReadExact(c.AmmoSite, 2).SequenceEqual(saved.ExpectedBytes), "Saved restoration did not return original firing."); await Complete(c, 13);
                     Console.WriteLine("RESOLVED restarted pid=" + c.Pid + " locator=" + saved.LocatorKind + " address=0x" + resolved.Address.ToString("X") + " inactive-before-explicit-apply=1");
                 }
                 await Timed(w.Session.DetachAsync(), "Final detach"); await c.Exit();
@@ -384,7 +460,7 @@ internal static class RuntimeWalkthrough
         static string Quote(string value) => "\"" + value.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
         public Child(string executable, int room)
         {
-            string launched = executable, arguments = "--room " + room;
+            string launched = executable, arguments = "--room " + room + " --unlock-all";
             if (!Windows) {
                 launched = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "breakout-launcher");
                 if (!File.Exists(launched)) launched = Path.Combine(Path.GetDirectoryName(executable), "breakout-launcher");
@@ -433,23 +509,29 @@ internal static class RuntimeWalkthrough
             Check(Last.ContainsKey("seq") && Last.ContainsKey("room"), "GUI action record lacks sequence/room.");
             Check(long.Parse(Last["seq"], CultureInfo.InvariantCulture) == ++sequence && Last["name"] == expectedName, "Unexpected extra/mismatched GUI action: " + LastLine);
         }
-        public async Task Room(int room) { await SendKey("F" + room, false); await Record("room"); Check(Last["room"] == room.ToString(CultureInfo.InvariantCulture) && Last["paused"] == "1", "Room input did not select/automatically pause."); }
+        // Rooms 1-12 are F1-F12; Shift+F1 is room 13 and Shift+F12 room 0.
+        public async Task Room(int room) {
+            if (room >= 1 && room <= 12) await SendKey("F" + room, false); else await SendKey(room == 13 ? "F1" : "F12", false, true);
+            await Record("room"); Check(Last["room"] == room.ToString(CultureInfo.InvariantCulture) && Last["paused"] == "1", "Room input did not select the room under the test freeze.");
+        }
+        // The hidden test freeze makes every following action deterministic.
+        public async Task Freeze() { await Action("p"); if (Last["paused"] != "1") await Action("p"); Check(Last["paused"] == "1", "Test freeze did not engage."); }
         public async Task Action(string key) {
-            var names = new Dictionary<string,string> { {"r","reset"}, {"f","fire"}, {"h","hit_player"}, {"j","hit_enemy"}, {"e","enemy_fire"}, {"b","charge"}, {"d","drain"}, {"w","swap"}, {"t","tick"}, {"l","reload"}, {"p","pause"}, {"y","trial"}, {"k","keycard"}, {"g","power"}, {"a","alarm"} };
-            string expected = key == "o" ? (Last["room"] == "2" ? "reactor" : "door") : key == "m" ? (Last["room"] == "5" ? "project" : Last["room"] == "9" ? "discovery" : Last["room"] == "11" ? "trace" : "restart") : names[key];
+            var names = new Dictionary<string,string> { {"r","reset"}, {"f","fire"}, {"h","hit_player"}, {"j","hit_enemy"}, {"e","enemy_fire"}, {"b","charge"}, {"d","drain"}, {"w","swap"}, {"t","tick"}, {"l","reload"}, {"p","pause"}, {"y","trial"}, {"a","alarm"}, {"n","relay"} };
+            string expected = key == "o" ? (Last.ContainsKey("room") && Last["room"] == "2" ? "reactor" : "door") : names[key];
             await SendKey(key, true); await Record(expected);
         }
-        async Task SendKey(string key, bool control)
+        async Task SendKey(string key, bool control, bool shift = false)
         {
             if (!Windows) {
                 string prefix = "windowfocus --sync " + window + " ";
-                string commands = (control ? "keydown Control_L " : "") + "keydown " + key + " sleep 0.08 keyup " + key + (control ? " keyup Control_L" : "");
+                string commands = (control ? "keydown Control_L " : "") + (shift ? "keydown Shift_L " : "") + "keydown " + key + " sleep 0.08 keyup " + key + (shift ? " keyup Shift_L" : "") + (control ? " keyup Control_L" : "");
                 await Xdotool(prefix + commands);
             } else {
                 Check(SetForegroundWindow(new IntPtr(long.Parse(window))), "Could not foreground game for ordinary SendInput.");
                 await Task.Delay(40);
                 ushort code = key.StartsWith("F", StringComparison.Ordinal) && key.Length > 1 ? (ushort)(0x70 + int.Parse(key.Substring(1)) - 1) : (ushort)char.ToUpperInvariant(key[0]);
-                if (control) InputKey(0x11, false); InputKey(code, false); await Task.Delay(250); InputKey(code, true); if (control) InputKey(0x11, true); await Task.Delay(40);
+                if (control) InputKey(0x11, false); if (shift) InputKey(0x10, false); InputKey(code, false); await Task.Delay(250); InputKey(code, true); if (shift) InputKey(0x10, true); if (control) InputKey(0x11, true); await Task.Delay(40);
             }
         }
         public async Task HoldRight(bool down)

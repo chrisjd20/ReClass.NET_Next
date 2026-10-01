@@ -25,7 +25,8 @@ public:
     // A room change or reset: forget previous values without effects.
     void reset(const RenderSnapshot& snapshot);
     // Changes between frames come from outside the process (ReClass edits).
-    void observeExternal(const RenderSnapshot& before, const RenderSnapshot& now, int room);
+    // Returns which fields changed ("ammo", "speed", ...).
+    std::vector<std::string> observeExternal(const RenderSnapshot& before, const RenderSnapshot& now, int room);
     // Changes during this frame's own actions and ticks.
     void observeInternal(const RenderSnapshot& before, const RenderSnapshot& after, int room, Vector2 aim, bool aimed);
     void attempt(int room, bool accepted);

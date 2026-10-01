@@ -10,24 +10,34 @@ namespace ReClassNET.Nodes
 {
 	public abstract class BaseHexCommentNode : BaseHexNode
 	{
+		private int AddNumericPreview(DrawContext view, int x, int y, string text, NumericPreviewKind kind, int width)
+		{
+			if (MemorySize < width || (width != 4 && width != 8))
+				return AddText(view, x, y, view.Settings.ValueColor, HotSpot.ReadOnlyId, text) + view.Font.Width;
+			var count = view.HotSpots.Count;
+			var end = AddText(view, x, y, view.Settings.ValueColor, 200 + (int)kind, text);
+			if (view.HotSpots.Count > count) view.HotSpots.Last().NumericEdit = new NumericPreviewEdit(kind, width);
+			return end + view.Font.Width;
+		}
+
 		protected int AddComment(DrawContext view, int x, int y, float fvalue, IntPtr ivalue, UIntPtr uvalue)
 		{
 			Contract.Requires(view != null);
 
 			if (view.Settings.ShowCommentFloat)
 			{
-				x = AddText(view, x, y, view.Settings.ValueColor, HotSpot.ReadOnlyId, fvalue > -999999.0f && fvalue < 999999.0f ? fvalue.ToString("0.000") : "#####") + view.Font.Width;
+				x = AddNumericPreview(view, x, y, fvalue > -999999.0f && fvalue < 999999.0f ? fvalue.ToString("0.000") : "#####", NumericPreviewKind.Float, 4);
 			}
 			if (view.Settings.ShowCommentInteger)
 			{
 				if (ivalue == IntPtr.Zero)
 				{
-					x = AddText(view, x, y, view.Settings.ValueColor, HotSpot.ReadOnlyId, "0") + view.Font.Width;
+					x = AddNumericPreview(view, x, y, "0", NumericPreviewKind.SignedInteger, MemorySize);
 				}
 				else
 				{
-					x = AddText(view, x, y, view.Settings.ValueColor, HotSpot.ReadOnlyId, ivalue.ToInt64().ToString()) + view.Font.Width;
-					x = AddText(view, x, y, view.Settings.ValueColor, HotSpot.ReadOnlyId, $"0x{uvalue.ToUInt64():X}") + view.Font.Width;
+					x = AddNumericPreview(view, x, y, ivalue.ToInt64().ToString(), NumericPreviewKind.SignedInteger, MemorySize);
+					x = AddNumericPreview(view, x, y, $"0x{uvalue.ToUInt64():X}", NumericPreviewKind.HexInteger, MemorySize);
 				}
 			}
 

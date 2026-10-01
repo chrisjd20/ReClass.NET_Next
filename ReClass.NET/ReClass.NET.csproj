@@ -426,6 +426,7 @@
       <DependentUpon>SettingsForm.cs</DependentUpon>
     </Compile>
     <Compile Include="UI\HotSpot.cs" />
+    <Compile Include="UI\NumericPreviewEdit.cs" />
     <Compile Include="UI\FontEx.cs" />
     <Compile Include="Controls\HotSpotTextBox.cs">
       <SubType>Component</SubType>

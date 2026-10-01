@@ -24,7 +24,7 @@ ADVANCED_EXPORTS = {'RcDebugQueryV1', 'RcDebugExecuteV1', 'RcDebugWaitV1'}
 def verify_demo(root, platform):
     demo = root / 'Demo'
     build = json.loads((root / 'BUILD.json').read_text())['demo']
-    assert build['rooms'] == 12
+    assert build['rooms'] == 14
     dependencies = json.loads((demo / 'DEPENDENCIES.json').read_text())
     assert dependencies == build['dependencies']
     raylib = dependencies['raylib']
@@ -51,9 +51,9 @@ def verify_demo(root, platform):
         assert hashlib.sha256(content).hexdigest() == target['guides'][name], (platform, name)
     html = (demo / 'GUIDE.html').read_text()
     markdown = (demo / 'GUIDE.md').read_text()
-    for room in range(1, 13):
+    for room in range(0, 14):
         assert f'id="room-{room}"' in html, (platform, 'Missing HTML room', room)
-        assert re.search(r'^## ' + str(room) + r'\. ', markdown, re.MULTILINE), (platform, 'Missing Markdown room', room)
+        assert re.search(r'^## Room ' + str(room) + r': ', markdown, re.MULTILINE), (platform, 'Missing Markdown room', room)
     assert not re.search(r'<(?:script|link|img)\b[^>]*(?:src|href)\s*=\s*[\"\']https?://', html, re.IGNORECASE), 'Offline guide loads remote resources'
     if platform == 'windows':
         image = pefile.PE(str(executable))

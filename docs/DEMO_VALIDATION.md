@@ -287,3 +287,86 @@ the Windows campaign and the interactive ReClass GUI checklist were not run.
 |---|---|
 | Windows | `635796cd7c73b20a7b92634895ebc1fe3a4c5730b8e8d6e53cb843cd06de83fe` |
 | Linux | `75494bbc533e6c0adbf760eaa30f02fb6667958e66af492631022513a0ee62c3` |
+
+## Gameplay and lesson revamp (v2) — 2026-10-01
+
+Play-testing showed rooms that could only be solved with the debug readout
+(Room 3's speed never changes, so a value scan cannot narrow it), test-style
+controls on a paused simulation, and wall-of-text lessons with hints that did not
+help. The game was reworked:
+
+- 14 rooms (0 Attach, 1–13) in four chapters. Each teaches one technique and
+  every value is reachable with ReClass alone: by a scan driven by an in-game
+  change, as a neighbour in a class, by following a pointer, or by a watch.
+- Real-time play: WASD, mouse aim and shoot, **E** at consoles, pads that act
+  while stood on, a 3-2-1 countdown for the Room 3 run, respawn with a reason.
+  The hotbar and visible pause are gone; a hidden test freeze (Ctrl+P) and
+  hidden Ctrl action hooks keep the harness deterministic.
+- The drawer is a checklist: one action per step, IN GAME / IN RECLASS tags,
+  ReClass labels as chips, auto-checked steps, no hints or solutions. Lesson
+  schema and generator changed; guides are numbered checklists.
+- New Room 6 (Static Root): the World is reallocated on every relay reboot;
+  learners pointer-scan from the Actor to the World and then to the module-static
+  `breakout_world_root`, and follow it with a `[<module>+offset]` class.
+- Progress version 4 (rooms renumbered) clears earlier completion and steps.
+- Rooms unlock in order: a room opens when the previous one is complete, and a
+  room completes only on its game-verified outcome (the final step cannot be
+  skipped). The Room 1 reload pad was removed. `--unlock-all` opens every room
+  for development and the harness.
+
+Two ReClass/Linux issues surfaced and were fixed:
+
+- The Linux core typed every anonymous mapping (heap included) as **Mapped**,
+  which the Scanner skips by default, so default scans could not find heap
+  values on Linux. Anonymous **private** mappings are now **Private** (as on
+  Windows); shared anonymous mappings stay Mapped.
+- `breakout_world_root` was in `.bss`, whose tail is an anonymous mapping on
+  Linux and therefore outside the module range. It now lives in `.data`, so it
+  shows as a green module-static result. The Scanner also shows
+  `<module>+0x…` as a tooltip on module-relative results.
+
+Linux evidence (Ubuntu 22.04 container, Xvfb + llvmpipe, container-scoped
+ptrace): packaged `--self-check` passed; the real-provider campaign passed rooms
+1–13 (Room 6 static root found at `<ReClassBreakout>+0x28C020`); `--resume-only`
+passed. Logs: `dist/breakout-v2/`. The combined export and artifact verifier
+passed for both packages. The packaged Windows executable passed `--self-check`
+and rendered through WSL interop; the Windows campaign and the interactive ReClass
+GUI checklist were not run. `validation/scanner` and `validation/fixes` were not
+re-run after the Linux section-type change.
+
+| Game in these packages | SHA-256 |
+|---|---|
+| Windows | `972fb46bccb1775c3dba779983505dd23b2c365c6ca3d8a250883c45d7443882` |
+| Linux | `8ce63adfb0753e58453be6f2875b0503c9c4ba3b18670799ff612f30e2879749` |
+
+## Lesson pass 3: convergent scans — 2026-10-01
+
+Play-testing found Room 3's walk-and-scan narrowing never converged. A
+whole-process measurement showed why: render and animation floats move with
+ROOKIE, and the game itself kept exact 4-byte copies of scanned fields (frame
+snapshots, and integer/float locals in the deliberately unoptimised game code).
+The earlier harness scanned only ROOKIE's 72 bytes and missed this.
+
+- Presentation copies and game-code locals of scanned fields are now doubles, so
+  a 4-byte scan finds only the real field. Reactor and HUD gauges use fixed
+  segments instead of geometry that scales with the charge.
+- Room 2 starts with `Is Between 5–100` (the remaining decoys were 0–1 colour
+  floats in the software renderer's thread stacks). Room 3 finds ROOKIE through
+  his ammo and reads speed from the class at ammo − 4; no relative scans.
+  Shooting works in every room; Start run appears only on Room 3's last step.
+- Steps carry a *why* line and a *you should see* line. Rooms 10–13 are an
+  optional Advanced chapter; Room 9's completion reads "You escaped the facility".
+- The harness runs the lesson scans over the whole process and fails unless they
+  narrow to a handful of results.
+
+Linux campaign (Xvfb + llvmpipe): Room 1 ammo 4,756 results → 1 after two shots;
+Room 2 31,022 → 4 after one round → 2; Room 3 ammo → 1 after one shot; Room 6
+static root `<ReClassBreakout>+0x292020`. Rooms 1–13 passed, `--resume-only`
+passed, `--self-check` passed. Logs: `dist/breakout-v2/`. Windows counts were not
+measured; GPU drivers keep less render data in process memory, so Windows should
+narrow at least as well.
+
+| Game in these packages | SHA-256 |
+|---|---|
+| Windows | `d0b7cf57cf3b49df38b643ecbb8c91f6630bb5a4a8a6d6d29cc628341cba0f5f` |
+| Linux | `69ac74af43d6291adcbd012b62e4492b8b3147fcea9af894905f78241dcdf41e` |

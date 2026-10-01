@@ -1,6 +1,7 @@
 #include "scene.h"
 #include "ui.h"
 #include "rlgl.h"
+#include "game.h"
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
@@ -135,37 +136,41 @@ void Scene::tracer(Vector2 from, Vector2 to, Color color, float width, float lif
     tracers_.push_back({from, to, life, life, color, width});
 }
 
-void Scene::observeExternal(const RenderSnapshot& before, const RenderSnapshot& now, int room) {
+std::vector<std::string> Scene::observeExternal(const RenderSnapshot& before, const RenderSnapshot& now, int room) {
     const Vector2 player{now.playerX, now.playerY - 34};
-    std::vector<std::string> changes;
-    const auto changed = [&](const std::string& name, const std::string& from, const std::string& to, Vector2 at) {
+    std::vector<std::string> keys, changes;
+    const auto changed = [&](const char* key, const std::string& name, const std::string& from, const std::string& to, Vector2 at) {
+        keys.push_back(key);
         changes.push_back(name + " " + from + " -> " + to);
         floater(at, name + " " + from + " -> " + to, Violet, true);
         burst({at.x, at.y + 30}, Violet, 26, 140, 2.5f);
     };
-    if (now.ammo != before.ammo) changed("AMMO", std::to_string(before.ammo), std::to_string(now.ammo), player);
-    if (now.health != before.health) changed("HEALTH", std::to_string(before.health), std::to_string(now.health), player);
-    if (now.charge != before.charge) changed("CHARGE", number(before.charge), number(now.charge), room == 2 ? Vector2{640, 110} : player);
-    if (now.playerSpeed != before.playerSpeed) changed("SPEED", number(before.playerSpeed), number(now.playerSpeed), player);
-    if (now.keycard != before.keycard) changed("KEYCARD", std::to_string(before.keycard), std::to_string(now.keycard), player);
-    if (now.flags != before.flags) changed("FLAGS", std::to_string(before.flags), std::to_string(now.flags), player);
-    if (now.clearance != before.clearance) changed("CLEARANCE", std::to_string(before.clearance), std::to_string(now.clearance), player);
-    if (now.callsign != before.callsign) changed("CALLSIGN", before.callsign, now.callsign, player);
-    if (now.weaponName != before.weaponName) changed("WEAPON", before.weaponName, now.weaponName, player);
-    else if (now.weaponDamage != before.weaponDamage) changed("DAMAGE", std::to_string(before.weaponDamage), std::to_string(now.weaponDamage), player);
+    if (now.ammo != before.ammo) changed("ammo", "AMMO", std::to_string(before.ammo), std::to_string(now.ammo), player);
+    if (now.health != before.health) changed("health", "HEALTH", std::to_string(before.health), std::to_string(now.health), player);
+    // The reactor gauge has no number on purpose; the flash shows only that it changed.
+    if (now.charge != before.charge) changed("charge", "CHARGE", room == 2 ? "?" : number(before.charge), room == 2 ? "!" : number(now.charge), room == 2 ? Vector2{640, 110} : player);
+    if (now.playerSpeed != before.playerSpeed) changed("speed", "SPEED", number(before.playerSpeed), number(now.playerSpeed), player);
+    if (now.keycard != before.keycard) changed("keycard", "KEYCARD", std::to_string(before.keycard), std::to_string(now.keycard), player);
+    if (now.flags != before.flags) changed("flags", "FLAGS", std::to_string(before.flags), std::to_string(now.flags), player);
+    if (now.clearance != before.clearance) changed("clearance", "CLEARANCE", std::to_string(before.clearance), std::to_string(now.clearance), player);
+    if (now.callsign != before.callsign) changed("callsign", "CALLSIGN", before.callsign, now.callsign, player);
+    if (now.weaponName != before.weaponName) changed("damage", "WEAPON", before.weaponName, now.weaponName, player);
+    else if (now.weaponDamage != before.weaponDamage) changed("damage", "DAMAGE", std::to_string(before.weaponDamage), std::to_string(now.weaponDamage), player);
     if (now.enemyHealth != before.enemyHealth) if (const auto* enemy = find(now, SceneObject::Kind::Enemy))
-        changed("ENEMY HP", std::to_string(before.enemyHealth), std::to_string(now.enemyHealth), {enemy->x, enemy->y - 34});
-    if (now.remainingTime != before.remainingTime) changed("TIME", number(before.remainingTime), number(now.remainingTime), {365, 110});
+        changed("enemy_health", "ENEMY HP", std::to_string(before.enemyHealth), std::to_string(now.enemyHealth), {enemy->x, enemy->y - 34});
+    if (now.remainingTime != before.remainingTime) changed("time", "TIME", number(before.remainingTime), number(now.remainingTime), {365, 110});
+    if (room == 6 && now.relayPower != before.relayPower) changed("relay", "RELAY POWER", number(before.relayPower), number(now.relayPower), {590, 120});
     if (std::hypot(now.playerX - before.playerX, now.playerY - before.playerY) > .01f) {
         burst({before.playerX, before.playerY}, Violet, 30, 90);
-        changed("POSITION", "(" + number(before.playerX) + ", " + number(before.playerY) + ")", "(" + number(now.playerX) + ", " + number(now.playerY) + ")", player);
+        changed("position", "POSITION", "(" + number(before.playerX) + ", " + number(before.playerY) + ")", "(" + number(now.playerX) + ", " + number(now.playerY) + ")", player);
     }
-    if (now.doorOpen != before.doorOpen) changed("DOOR", std::to_string(before.doorOpen), std::to_string(now.doorOpen), {650, 90});
-    if (changes.empty()) return;
+    if (now.doorOpen != before.doorOpen && room != 6) changed("door", "DOOR", std::to_string(before.doorOpen), std::to_string(now.doorOpen), {650, 90});
+    if (changes.empty()) return keys;
     ++edits_;
     glitch_ = 1; flash_ = .35f; flashColor_ = Violet; shake_ = std::max(shake_, 4.0f);
     lastEdit_.text = changes.front() + (changes.size() > 1 ? "  (+" + std::to_string(changes.size() - 1) + " more)" : "");
     lastEdit_.at = GetTime();
+    return keys;
 }
 
 void Scene::observeInternal(const RenderSnapshot& before, const RenderSnapshot& after, int room, Vector2 aim, bool aimed) {
@@ -192,15 +197,15 @@ void Scene::observeInternal(const RenderSnapshot& before, const RenderSnapshot& 
             end = {player.x + dx / length * 900, player.y + dy / length * 900};
         }
         const float speed = std::clamp(after.projectileSpeed, 60.0f, 2000.0f);
-        tracer(player, end, room == 6 && after.weaponDamage >= 20 ? Gold : Teal, 3, std::clamp(260.0f / speed * .22f, .08f, .5f));
+        tracer(player, end, room == 5 && after.weaponDamage >= 20 ? Gold : Teal, 3, std::clamp(260.0f / speed * .22f, .08f, .5f));
         burst(player, Gold, 6, 90, 2);
         if (struck) {
             burst(end, destroyed ? Gold : Teal, destroyed ? 40 : 12, destroyed ? 220.0f : 120.0f, destroyed ? 3.5f : 2.5f);
             if (destroyed) { shake_ = std::max(shake_, 5.0f); flash_ = .12f; flashColor_ = Gold; }
-            const int damage = std::max(0, after.weaponDamage);
+            const int damage = static_cast<int>(std::max<long long>(0, after.weaponDamage));
             if (struck->health < 1000 && !destroyed) floater({end.x, end.y - 30}, "-" + std::to_string(damage), Gold);
-            if (room == 6 && destroyed) floater({end.x, end.y - 30}, "ARMOR BREACHED", Gold);
-        } else if (room == 6 && after.weaponDamage < 20) {
+            if (room == 5 && destroyed) floater({end.x, end.y - 30}, "ARMOR BREACHED", Gold);
+        } else if (room == 5 && after.weaponDamage < 20) {
             const SceneObject* nearest = nullptr;
             for (const auto& object : after.objects)
                 if (object.kind == SceneObject::Kind::Target && object.active) { nearest = &object; break; }
@@ -224,7 +229,7 @@ void Scene::observeInternal(const RenderSnapshot& before, const RenderSnapshot& 
     if (after.hits > before.hits) {
         Vector2 source{player.x + 200, player.y - 120};
         if (const auto* turret = find(after, SceneObject::Kind::Turret)) source = {turret->x, turret->y};
-        if (room == 9) source = {400, 330};
+        if (room == 10) source = {400, 330};
         tracer(source, player, Red, 4, .22f);
         if (after.health < before.health) {
             floater(head, "-" + std::to_string(before.health - after.health) + " HP", Red);
@@ -245,7 +250,6 @@ void Scene::observeInternal(const RenderSnapshot& before, const RenderSnapshot& 
         floater({head.x, head.y - 16}, "NEW WEAPON ADDRESS", Violet);
         burst(player, Blue, 20, 100);
     }
-    if (after.charge > before.charge && room == 2) burst({640, 180}, Blue, 10, 80, 2);
     if (after.trialRunning && !before.trialRunning) floater({365, 120}, "RUN!", Gold);
     if (!before.primary && after.primary) {
         completeGlow_ = 1.5f;
@@ -339,11 +343,49 @@ void Scene::drawEnvironment(const RenderSnapshot& snapshot, int room) {
     BeginBlendMode(BLEND_ADDITIVE);
     for (float x = 100; x < WorldW; x += 200) DrawCircleGradient(static_cast<int>(x), 200, 170, Color{40, 70, 110, 38}, Color{0, 0, 0, 0});
     EndBlendMode();
-    // Spawn pad under the default start position.
-    DrawCircleV({70, 180}, 30, Fade(Teal, .08f));
-    DrawCircleLinesV({70, 180}, 30, Fade(Teal, .5f));
+
+    // Pads and consoles. Pads act while you stand on them; consoles take E.
+    for (const auto& zone : snapshot.zones) {
+        const Rectangle r{zone.x, zone.y, zone.w, zone.h};
+        if (zone.id == "turret") {
+            DrawRectangleRec(r, Fade(Red, zone.occupied ? .10f : .05f));
+            for (float x = r.x; x < r.x + r.width; x += 40) DrawLineEx({x, r.y}, {x + 20, r.y}, 3, Fade(Red, .5f));
+            DrawRectangleLinesEx(r, 2, Fade(Red, .5f + .2f * std::sin(time_ * 4)));
+            label("TURRET ZONE", {r.x + r.width * .5f, r.y + r.height - 22}, 12, Red);
+            continue;
+        }
+        if (!zone.interact) {
+            const Color color = zone.id == "charge" ? Blue : zone.id == "drain" || zone.id == "press" ? Red : Teal;
+            DrawRectangleRounded(r, .15f, 4, Fade(color, zone.occupied ? .30f : .14f));
+            DrawRectangleRoundedLinesEx(r, .15f, 4, 2, Fade(color, .6f + .4f * std::sin(time_ * 3)));
+            if (zone.occupied) glow({r.x + r.width * .5f, r.y + r.height * .5f}, r.width * .7f, color);
+            if (zone.id == "charge" || zone.id == "drain")
+                for (int i = 0; i < 3; ++i) {
+                    const float phase = std::fmod(time_ * (zone.occupied ? 1.6f : .5f) + static_cast<float>(i) / 3, 1.0f);
+                    const float y = zone.id == "charge" ? r.y + r.height * (1 - phase) : r.y + r.height * phase;
+                    DrawLineEx({r.x + 10, y}, {r.x + r.width - 10, y}, 2, Fade(color, 1 - phase));
+                }
+            label(zone.label, {r.x + r.width * .5f, r.y + r.height + 4}, 11, color);
+            continue;
+        }
+        const Vector2 center{r.x + r.width * .5f, r.y + r.height * .5f};
+        glow(center, std::max(r.width, r.height) * (zone.occupied ? .9f : .6f), Teal);
+        DrawRectangleRounded(r, .2f, 4, Color{18, 34, 40, 255});
+        DrawRectangleRoundedLinesEx(r, .2f, 4, 2, zone.occupied ? Ink : Teal);
+        DrawRectangleRounded({r.x + 8, r.y + 8, r.width - 16, std::min(18.0f, r.height - 16)}, .3f, 4, Fade(Teal, .35f + .25f * std::sin(time_ * 5)));
+    }
 
     switch (room) {
+    case 0: {
+        DrawRectangleRounded({250, 100, 300, 180}, .06f, 4, Dark);
+        DrawRectangleRoundedLinesEx({250, 100, 300, 180}, .06f, 4, 2, Teal);
+        label("TRAINING FACILITY", {400, 120}, 16, Teal);
+        label("Attach ReClass to this process,", {400, 160}, 13, Ink);
+        label("then pick a room (Escape).", {400, 182}, 13, Ink);
+        label("WASD move  -  mouse aim  -  click shoot", {400, 222}, 11, Muted);
+        label("E use consoles  -  Tab instructions", {400, 242}, 11, Muted);
+        break;
+    }
     case 1: {
         for (float x = 200; x < 760; x += Tile) DrawTexturePro(sprites_.hazard, {0, 0, 32, 32}, {x, 0, Tile, 10}, {0, 0}, 0, Fade(WHITE, .7f));
         label("DRONE BAY", {490, 14}, 12, Gold);
@@ -352,6 +394,7 @@ void Scene::drawEnvironment(const RenderSnapshot& snapshot, int room) {
     case 2: {
         for (float x = 690; x < WorldW; x += 14) DrawRectangle(static_cast<int>(x), 160, 8, 40, Color{40, 56, 78, 255});
         DrawRectangle(680, 172, 120, 16, Color{30, 44, 62, 255});
+        DrawLineEx({290, 105}, {600, 170}, 3, Fade(Blue, .25f));
         break;
     }
     case 3: {
@@ -361,26 +404,31 @@ void Scene::drawEnvironment(const RenderSnapshot& snapshot, int room) {
             const float x = std::fmod(static_cast<float>(i * 97), WorldW), y = std::fmod(static_cast<float>(i * 53) + time_ * (8 + i % 5), WorldH);
             if (y < 140 || y > 220) DrawCircleV({x, y}, 1.2f, Color{40, 56, 80, 255});
         }
-        const float collapse = snapshot.trialRunning ? 45 + std::clamp((8 - snapshot.remainingTime) / 8, 0.0f, 1.0f) * 640 : 45;
+        // Everything behind the collapse front has fallen; it stays fallen until the next start.
+        const float collapse = std::max(45.0f, snapshot.collapseX);
         for (float x = 45; x < 685; x += Tile) {
-            const float fall = x + Tile <= collapse ? std::min(1.0f, (collapse - x - Tile) / 120) : 0;
+            const float fall = x + Tile <= collapse ? std::min(1.0f, (collapse - x - Tile) / 60) : 0;
             const float inset = fall * 14;
-            DrawTexturePro(sprites_.floor[0], {0, 0, 32, 32}, {x + inset, 145 + inset, Tile - inset * 2, 70 - inset * 2}, {0, 0}, 0, Fade(WHITE, 1 - fall));
+            DrawTexturePro(sprites_.floor[0], {0, 0, 32, 32}, {x + inset, 145 + inset + fall * 30, Tile - inset * 2, 70 - inset * 2}, {0, 0}, 0, Fade(WHITE, 1 - fall));
         }
-        DrawRectangleLinesEx({45, 145, 640, 70}, 2, Color{70, 96, 126, 255});
-        if (snapshot.trialRunning) {
+        DrawRectangleLinesEx({collapse, 145, 685 - collapse, 70}, 2, Color{70, 96, 126, 255});
+        // Start line.
+        DrawTexturePro(sprites_.hazard, {0, 0, 32, 8}, {Game::SpawnX - 24, 141, 6, 78}, {0, 0}, 0, WHITE);
+        label("START", {Game::SpawnX - 21, 124}, 11, Teal);
+        if (snapshot.trialRunning && collapse > 45) {
             DrawRectangle(static_cast<int>(collapse) - 4, 145, 4, 70, Fade(Red, .7f + .3f * std::sin(time_ * 20)));
             glow({collapse, 180}, 40, Red);
+            if (GetRandomValue(0, 3) == 0) burst({collapse, 180 + static_cast<float>(GetRandomValue(-30, 30))}, Color{110, 130, 160, 255}, 2, 40, 2);
         }
         std::ostringstream timer; timer << std::fixed << std::setprecision(2) << snapshot.remainingTime << "s";
         label(timer.str(), {365, 70}, 34, snapshot.trialRunning ? (snapshot.remainingTime < 3 ? Red : Gold) : Muted);
-        label(snapshot.trialRunning ? "REACH THE EXIT" : "START TRIAL (Ctrl+Y)", {365, 110}, 12, Muted);
+        label(snapshot.trialRunning ? "RUN!" : snapshot.primary ? "CROSSED" : snapshot.countdown > 0 ? "GET READY" : snapshot.fall > 0 ? "THE BRIDGE GAVE WAY" : "NOTHING MOVES UNTIL YOU START A RUN", {365, 110}, 12, snapshot.fall > 0 ? Red : Muted);
         break;
     }
-    case 4: case 5: case 11: {
+    case 4: case 6: case 9: case 12: {
         // Door halves slide apart into the wall as the decision opens.
         const float open = doorOpen_ * 58;
-        const Color doorColor = room == 11 ? Color{78, 64, 124, 255} : Color{70, 88, 112, 255};
+        const Color doorColor = room == 12 ? Color{78, 64, 124, 255} : Color{70, 88, 112, 255};
         for (const float sign : {-1.0f, 1.0f}) {
             const Rectangle half{628, sign < 0 ? 120 - open : 180 + open, 44, 60};
             DrawRectangleRec(half, doorColor);
@@ -388,36 +436,36 @@ void Scene::drawEnvironment(const RenderSnapshot& snapshot, int room) {
             DrawTexturePro(sprites_.hazard, {0, 0, 32, 8}, {half.x + 2, sign < 0 ? half.y + half.height - 8 : half.y, half.width - 4, 8}, {0, 0}, 0, WHITE);
         }
         partition(sprites_.wall, 650, 120, 240);
-        glow({650, 180}, 60, doorOpen_ > .5f ? Teal : room == 11 ? Violet : Red);
+        glow({650, 180}, 60, doorOpen_ > .5f ? Teal : room == 12 ? Violet : Red);
         if (doorOpen_ > .5f) for (float x = 680; x < WorldW; x += 30) DrawCircleV({x, 180}, 4, Fade(Teal, .5f + .5f * std::sin(time_ * 5 - x * .05f)));
-        DrawRectangleRounded({540, 40, 100, 70}, .12f, 4, Dark);
-        DrawRectangleRoundedLinesEx({540, 40, 100, 70}, .12f, 4, 1, Border);
+        DrawRectangleRounded({522, 40, 136, 70}, .12f, 4, Dark);
+        DrawRectangleRoundedLinesEx({522, 40, 136, 70}, .12f, 4, 1, Border);
         if (room == 4) {
-            light({560, 64}, snapshot.keycard == 1, "KEY", time_);
+            light({548, 64}, snapshot.keycard == 1, "KEY", time_);
             light({590, 64}, (snapshot.flags & 1u) != 0, "PWR", time_);
-            light({620, 64}, (snapshot.flags & 2u) == 0, "ALARM", time_);
+            light({632, 64}, (snapshot.flags & 2u) == 0, "ALARM", time_);
             label("BLAST DOOR", {590, 95}, 11, Gold);
-        } else if (room == 5) {
-            light({570, 64}, snapshot.callsign == "ENGINEER", "ID", time_);
-            light({610, 64}, snapshot.clearance == 2, "CLR", time_);
+        } else if (room == 6) {
+            const float power = std::clamp(static_cast<float>(snapshot.relayPower) / 100.0f, 0.0f, 1.0f);
+            label("RELAY", {590, 48}, 11, Blue);
+            DrawRectangle(540, 66, 100, 8, Color{24, 34, 48, 255});
+            DrawRectangle(540, 66, static_cast<int>(100 * power), 8, power >= 1 ? Teal : Blue);
+            label("LINKS " + std::to_string(std::min(3, snapshot.links)) + " / 3", {590, 84}, 11, snapshot.links >= 3 ? Teal : Gold);
+        } else if (room == 9) {
+            light({560, 64}, snapshot.callsign == "ENGINEER", "ID", time_);
+            light({620, 64}, snapshot.clearance == 2, "CLR", time_);
             label("BIOMETRIC GATE", {590, 95}, 11, Gold);
-            // Scanner pad and live ID display.
-            DrawRectangleRounded({470, 150, 60, 60}, .15f, 4, snapshot.scanning ? Color{20, 60, 60, 255} : Color{20, 40, 50, 255});
-            DrawRectangleRoundedLinesEx({470, 150, 60, 60}, .15f, 4, 1.5f, Teal);
             const float sweep = 150 + std::fmod(time_ * (snapshot.scanning ? 140.0f : 40.0f), 60);
             DrawLineEx({472, sweep}, {528, sweep}, 2, Fade(Teal, .8f));
-            if (snapshot.scanning) {
-                glow({500, 180}, 50, Teal);
-                label(snapshot.primary ? "ID ACCEPTED" : "SCANNING...", {500, 128}, 11, snapshot.primary ? Teal : Gold);
-            } else label("SCAN PAD", {500, 216}, 11, Muted);
+            if (snapshot.scanning) label(snapshot.primary ? "ID ACCEPTED" : "SCANNING...", {500, 128}, 11, snapshot.primary ? Teal : Gold);
             DrawRectangleRounded({420, 250, 170, 60}, .1f, 4, Dark);
             DrawRectangleRoundedLinesEx({420, 250, 170, 60}, .1f, 4, 1, Teal);
             text("ID: " + snapshot.callsign, 430, 258, 12, Teal, Face::Mono);
-            text("CLEARANCE: " + std::to_string(snapshot.clearance) + (snapshot.clearance == 2 ? " ENGINEER" : snapshot.clearance == 0 ? " GUEST" : ""), 430, 280, 12, snapshot.clearance == 2 ? Teal : Gold, Face::Mono);
+            text("CLEARANCE: " + std::to_string(snapshot.clearance) + (snapshot.clearance == 2 ? " ENGINEER" : snapshot.clearance == 0 ? " VISITOR" : ""), 430, 280, 12, snapshot.clearance == 2 ? Teal : Gold, Face::Mono);
         } else {
-            light({560, 64}, snapshot.keycard == 1, "KEY", time_);
+            light({548, 64}, snapshot.keycard == 1, "KEY", time_);
             light({590, 64}, snapshot.clearance == 2, "CLR", time_);
-            light({620, 64}, (snapshot.flags & 1u) != 0 && (snapshot.flags & 2u) == 0, "PWR", time_);
+            light({632, 64}, (snapshot.flags & 2u) == 0, "ALARM", time_);
             label("DECISION VAULT", {590, 95}, 11, Violet);
             DrawCircleLinesV({650, 180}, 36, Fade(Violet, .8f));
             const float dial = time_ * (doorOpen_ > .5f ? 0.0f : 1.4f);
@@ -425,37 +473,32 @@ void Scene::drawEnvironment(const RenderSnapshot& snapshot, int room) {
         }
         break;
     }
+    case 5:
+        label("ARMORY", {160, 280}, 11, Blue);
+        break;
     case 7:
         for (float x = 480; x < 780; x += 44) DrawRectangleRounded({x, 150, 36, 18}, .5f, 4, Color{80, 72, 52, 255});
-        label("TURRET NEST", {700, 20}, 12, Red);
         break;
-    case 8: case 10: case 12: {
+    case 8: case 11: case 13: {
         DrawRectangleRounded({700, 110, 80, 140}, .08f, 4, Dark);
         label("AMMO", {740, 122}, 10, Muted);
         label(std::to_string(snapshot.ammo), {740, 140}, 30, snapshot.ammo > 12 ? Gold : Ink);
-        if (room == 10) {
+        if (room == 11) {
             label("HP", {740, 190}, 10, Muted);
             label(std::to_string(snapshot.health), {740, 206}, 22, Teal);
         }
-        if (room == 12) label("RETURN VISIT", {740, 232}, 10, Blue);
+        if (room == 13) label("RETURN VISIT", {740, 232}, 10, Blue);
         break;
     }
-    case 9: {
-        // Shared damage press: one routine, two cables.
+    case 10: {
+        // Shared damage press over its plate: one routine, two cables.
         const Vector2 press{400, 330};
-        DrawRectangleRounded({press.x - 60, press.y - 24, 120, 48}, .2f, 4, Color{44, 32, 44, 255});
+        DrawRectangleRounded({press.x - 60, press.y - 24, 120, 48}, .2f, 4, Fade(Color{44, 32, 44, 255}, .85f));
         DrawRectangleRoundedLinesEx({press.x - 60, press.y - 24, 120, 48}, .2f, 4, 1.5f, Red);
-        label("SHARED DAMAGE", {press.x, press.y - 14}, 10, Red);
-        label("ROUTINE", {press.x, press.y}, 10, Red);
+        label("PRESS", {press.x, press.y - 8}, 12, Red);
         DrawLineBezier({press.x - 60, press.y}, {snapshot.playerX, snapshot.playerY + 20}, 2, Fade(Red, .4f));
         if (const auto* enemy = find(snapshot, SceneObject::Kind::Enemy)) DrawLineBezier({press.x + 60, press.y}, {enemy->x, enemy->y + 20}, 2, Fade(Red, .4f));
-        // Override console: the press unlocks when player clearance matches the player's code.
-        const Rectangle console{300, 40, 200, 64};
-        DrawRectangleRounded(console, .12f, 4, Dark);
-        DrawRectangleRoundedLinesEx(console, .12f, 4, 1.5f, snapshot.primary ? Teal : Gold);
-        label("PRESS OVERRIDE", {400, 48}, 10, Muted);
-        label(snapshot.primary ? "UNLOCKED" : "INPUT " + std::to_string(snapshot.clearance), {400, 64}, 16, snapshot.primary ? Teal : Gold);
-        label("a code travels with each hit", {400, 86}, 10, Muted);
+        label(snapshot.primary ? "OVERRIDE UNLOCKED" : "OVERRIDE INPUT " + std::to_string(snapshot.clearance), {400, 112}, 12, snapshot.primary ? Teal : Gold);
         break;
     }
     default: break;
@@ -473,7 +516,7 @@ void Scene::drawObjects(const RenderSnapshot& snapshot, int room) {
                 for (int ring = 3; ring >= 1; --ring) DrawCircleLinesV(at, static_cast<float>(ring) * 7, Fade(Blue, .8f));
                 glow(at, 40, Blue);
                 label("TRAINING WALL", {at.x, at.y + 54}, 11, Muted);
-            } else if (room == 6) {
+            } else if (room == 5) {
                 const bool waiting = &object == &snapshot.objects.back() && snapshot.swaps == 0;
                 const Color tint = waiting ? Fade(WHITE, .35f) : WHITE;
                 if (object.active) {
@@ -518,25 +561,31 @@ void Scene::drawObjects(const RenderSnapshot& snapshot, int room) {
             break;
         }
         case SceneObject::Kind::Reactor: {
-            const float charge = std::clamp(snapshot.charge / 100.0f, 0.0f, 1.0f);
+            const float charge = std::clamp(static_cast<float>(snapshot.charge) / 100.0f, 0.0f, 1.0f);
             const bool online = snapshot.primary;
             const Color core = online ? Color{255, 240, 200, 255} : mix(Blue, Gold, (charge - .4f) / .5f);
-            glow(at, 90 + 10 * std::sin(time_ * 3), core);
+            // Fixed geometry, only colours follow the charge: drawn shapes that scale with the
+            // charge would leave float vertex data that rises and falls with it (scan decoys).
+            glow(at, 90, core);
             DrawCircleV(at, 34, Dark);
-            DrawCircleV(at, 20 + 6 * charge + 2 * std::sin(time_ * 6), core);
+            DrawCircleV(at, 24, core);
             for (int ring = 0; ring < 3; ++ring) {
-                const float spin = time_ * (40 + 120 * charge) * (ring % 2 ? -1 : 1) + ring * 60;
-                DrawRing(at, 38 + ring * 6, 41 + ring * 6, spin, spin + 110, 16, Fade(core, .6f));
+                const float spin = time_ * 60 * (ring % 2 ? -1 : 1) + static_cast<float>(ring) * 60;
+                DrawRing(at, 38 + static_cast<float>(ring) * 6, 41 + static_cast<float>(ring) * 6, spin, spin + 110, 16, Fade(core, .6f));
             }
-            // Charge gauge with the normal cap and the reactor threshold marked.
-            DrawRing(at, 62, 68, -90, 270, 64, Color{24, 34, 48, 255});
-            DrawRing(at, 62, 68, -90, -90 + 360 * charge, 64, charge >= .9f ? Gold : Blue);
+            // Segmented charge gauge with the normal cap and the reactor threshold marked.
+            const int lit = static_cast<int>(charge * 40);
+            for (int i = 0; i < 40; ++i) {
+                const float from = -90 + static_cast<float>(i) * 9;
+                const Color cell = i < lit ? (charge >= .9f ? Gold : Blue) : Color{24, 34, 48, 255};
+                DrawRing(at, 62, 68, from + 1, from + 8, 2, cell);
+            }
             for (const auto& mark : {std::pair<float, Color>{.6f, Red}, std::pair<float, Color>{.9f, Gold}}) {
                 const float a = (-90 + 360 * mark.first) * DEG2RAD;
                 DrawLineEx({at.x + std::cos(a) * 58, at.y + std::sin(a) * 58}, {at.x + std::cos(a) * 72, at.y + std::sin(a) * 72}, 3, mark.second);
             }
-            label("CHARGE " + number(snapshot.charge), {at.x, at.y + 78}, 12, charge >= .9f ? Gold : Blue);
-            label("cap 60  |  needs 90", {at.x, at.y + 96}, 11, Muted);
+            label(online ? "ONLINE" : "REACTOR", {at.x, at.y + 78}, 12, online ? Gold : Blue);
+            label("pad stops at the red mark; needs the gold mark", {at.x, at.y + 96}, 10, Muted);
             break;
         }
         case SceneObject::Kind::Exit: {
@@ -556,6 +605,14 @@ void Scene::drawPlayer(const RenderSnapshot& snapshot, int room, Vector2 aim, bo
         label("INVALID PLAYER POINTER / POSITION", {WorldW * .5f, WorldH * .5f}, 16, Red);
         return;
     }
+    if (snapshot.downed) return;
+    if (snapshot.fall > 0) {
+        // Tumble into the pit: spin, shrink and fade.
+        const float t = snapshot.fall;
+        const Vector2 at{snapshot.playerX, snapshot.playerY + 40 * t * t};
+        sprite(sprites_.player[0], at, 48 * (1 - .85f * t), 220 * t, facingLeft_, Fade(WHITE, 1 - t));
+        return;
+    }
     const Vector2 at{snapshot.playerX, snapshot.playerY};
     DrawEllipse(static_cast<int>(at.x), static_cast<int>(at.y + 20), 16, 5, Fade(BLACK, .45f));
     glow(at, 30 + 8 * completeGlow_, Teal);
@@ -570,7 +627,7 @@ void Scene::drawPlayer(const RenderSnapshot& snapshot, int room, Vector2 aim, bo
         DrawLineEx({aim.x, aim.y - 12}, {aim.x, aim.y - 5}, 1.5f, Teal);
         DrawLineEx({aim.x, aim.y + 5}, {aim.x, aim.y + 12}, 1.5f, Teal);
     }
-    label(snapshot.callsign.empty() ? "YOU" : snapshot.callsign, {at.x, at.y + 27}, 10, room == 5 && snapshot.callsign == "ENGINEER" ? Teal : Muted);
+    label(snapshot.callsign.empty() ? "YOU" : snapshot.callsign, {at.x, at.y + 27}, 10, room == 9 && snapshot.callsign == "ENGINEER" ? Teal : Muted);
 }
 
 void Scene::drawEffects() {

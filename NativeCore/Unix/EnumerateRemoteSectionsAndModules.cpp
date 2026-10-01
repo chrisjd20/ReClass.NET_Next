@@ -68,7 +68,8 @@ extern "C" void RC_CallConv EnumerateRemoteSectionsAndModules(RC_Pointer handle,
 		int dev1, dev2;
 		int inode;
 		std::string path;
-		ss >> std::hex >> start >> skip<char> >> end >> skip<char> >> protection >> skip<char> >> offset >> dev1 >> skip<char> >> dev2 >> std::dec >> inode >> std::skipws >> path;
+		char sharing = 'p';
+		ss >> std::hex >> start >> skip<char> >> end >> skip<char> >> protection >> sharing >> offset >> dev1 >> skip<char> >> dev2 >> std::dec >> inode >> std::skipws >> path;
 
 		EnumerateRemoteSectionData section = {};
 		section.BaseAddress = reinterpret_cast<RC_Pointer>(start);
@@ -102,7 +103,9 @@ extern "C" void RC_CallConv EnumerateRemoteSectionsAndModules(RC_Pointer handle,
 		}
 		else
 		{
-			section.Type = SectionType::Mapped;
+			// Anonymous private memory (heap, mmap'd allocations) matches Windows MEM_PRIVATE;
+			// only shared anonymous mappings are Mapped. The Scanner skips Mapped by default.
+			section.Type = sharing == 'p' ? SectionType::Private : SectionType::Mapped;
 
 			if (protection & SectionProtection::Read || protection & SectionProtection::Write)
 			{

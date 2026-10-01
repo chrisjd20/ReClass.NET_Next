@@ -57,6 +57,7 @@ namespace ReClassNET.Controls
 
 		private HotSpot selectionCaret;
 		private HotSpot selectionAnchor;
+		private ToolStripMenuItem editDoublePreviewMenuItem;
 
 		private readonly FontEx font;
 
@@ -611,7 +612,7 @@ namespace ReClassNET.Controls
 			{
 				try
 				{
-					hotSpot.Node.Update(hotSpot);
+					if (hotSpot.NumericEdit == null) hotSpot.Node.Update(hotSpot);
 				}
 				catch (Exception ex)
 				{
@@ -659,7 +660,42 @@ namespace ReClassNET.Controls
 		/// <param name="location">The location where the context menu should be shown.</param>
 		private void ShowNodeContextMenu(Point location)
 		{
-			NodeContextMenuStrip?.Show(this, location);
+			if (NodeContextMenuStrip == null) return;
+			if (editDoublePreviewMenuItem == null)
+			{
+				editDoublePreviewMenuItem = new ToolStripMenuItem("Edit as Double (8 bytes)");
+				editDoublePreviewMenuItem.Click += (sender, e) =>
+				{
+					if (selectedNodes.Count != 1 || !(selectedNodes[0].Node is Hex64Node)) return;
+					var selected = selectedNodes[0];
+					// Selection records can outlive a repaint or a pointer target change.
+					// Only edit an address that still belongs to the visible selected row.
+					var current = hotSpots.FirstOrDefault(s => s.Type == HotSpotType.Select && s.Node == selected.Node && s.Address == selected.Address && s.Level == selected.Level);
+					if (current == null)
+					{
+						MessageBox.Show(this, "The selected row changed. Select the visible value again.", "Edit numeric value", MessageBoxButtons.OK, MessageBoxIcon.Information);
+						return;
+					}
+					var session = current.Process.SessionIdentity;
+					var preview = hotSpots.FirstOrDefault(s => s.Node == selected.Node && s.Address == selected.Address && s.NumericEdit != null);
+					var spot = new HotSpot
+					{
+						Node = current.Node, Process = current.Process, Memory = current.Memory,
+						Address = current.Address, Type = HotSpotType.Edit, Text = string.Empty,
+						Rect = preview?.Rect ?? new Rectangle(120, current.Rect.Top, font.Width * 24, font.Height),
+						NumericEdit = new NumericPreviewEdit(NumericPreviewKind.Double, 8)
+					};
+					BeginInvoke(new Action(() =>
+					{
+						if (IsDisposed || hotSpotEditBox.IsDisposed || spot.Process.SessionIdentity != session) return;
+						if (!hotSpots.Any(s => s.Type == HotSpotType.Select && s.Node == spot.Node && s.Address == spot.Address && s.Level == current.Level)) return;
+						hotSpotEditBox.ShowOnHotSpot(spot);
+					}));
+				};
+			}
+			if (!NodeContextMenuStrip.Items.Contains(editDoublePreviewMenuItem)) NodeContextMenuStrip.Items.Insert(0, editDoublePreviewMenuItem);
+			editDoublePreviewMenuItem.Visible = selectedNodes.Count == 1 && selectedNodes[0].Node is Hex64Node;
+			NodeContextMenuStrip.Show(this, location);
 		}
 
 		public void ShowNodeNameEditBox(BaseNode node)

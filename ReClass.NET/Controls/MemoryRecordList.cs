@@ -108,6 +108,9 @@ namespace ReClassNET.Controls
 				{
 					e.CellStyle.ForeColor = Color.ForestGreen;
 					e.FormattingApplied = true;
+					// Static (module) addresses survive restarts; show the formula that finds them again.
+					resultDataGridView.Rows[e.RowIndex].Cells[e.ColumnIndex].ToolTipText =
+						$"<{record.ModuleName}>+0x{record.AddressOrOffset.ToInt64():X}  (static: lives inside the module)";
 				}
 			}
 			else if (e.ColumnIndex == 3) // Value

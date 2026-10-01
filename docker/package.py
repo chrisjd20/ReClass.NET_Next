@@ -37,7 +37,7 @@ manifest = {
     'assembly_dependencies': assembly_dependencies,
     'demo': {
         'name': 'ReClass: Breakout',
-        'rooms': 12,
+        'rooms': 14,
         'dependencies': demo_dependencies,
         'builds': demo_builds,
         'runtime_requirements': {

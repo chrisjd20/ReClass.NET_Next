@@ -45,5 +45,7 @@ namespace ReClassNET.UI
 		public RemoteProcess Process { get; set; }
 
 		public MemoryBuffer Memory { get; set; }
+
+		public NumericPreviewEdit NumericEdit { get; set; }
 	}
 }

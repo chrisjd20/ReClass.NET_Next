@@ -7,7 +7,13 @@
 #include <random>
 #include <sstream>
 
+// Keep the root in file-backed .data: on Linux the tail of .bss is an anonymous
+// mapping that ReClass does not count as part of the module.
+#if defined(__GNUC__) && !defined(_WIN32)
+extern "C" { __attribute__((section(".data"))) breakout::World* breakout_world_root = nullptr; }
+#else
 extern "C" { breakout::World* breakout_world_root = nullptr; }
+#endif
 
 namespace breakout {
 namespace {
@@ -32,34 +38,31 @@ std::string stringValue(const char* source, std::size_t size) {
     return result;
 }
 float renderFloat(float value, float fallback = 0) { return std::isfinite(value) ? value : fallback; }
+constexpr std::uint32_t MaintenanceFlag = 0x80;
 const char* actionLabel(Action action) {
     switch (action) {
-    case Action::FireOnce: return "Fire once";
-    case Action::Reload: return "Reload to 12";
-    case Action::ChargeOnce: return "Recharge once (+5)";
-    case Action::DrainOnce: return "Drain once (-5)";
+    case Action::FireOnce: return "Fire";
+    case Action::ChargeOnce: return "Charge +5";
+    case Action::DrainOnce: return "Drain -5";
     case Action::ActivateReactor: return "Activate reactor";
     case Action::AdvanceTick: return "Advance one tick";
-    case Action::ToggleKeycard: return "Toggle keycard";
-    case Action::TogglePower: return "Toggle power bit";
-    case Action::ToggleAlarm: return "Toggle alarm bit";
-    case Action::EvaluateDoor: return "Evaluate door";
+    case Action::ToggleAlarm: return "Flip alarm switch";
+    case Action::EvaluateDoor: return "Open door";
     case Action::SwapWeapon: return "Swap weapon";
     case Action::TakeOneHit: return "Take one hit";
-    case Action::HitEnemy: return "Hit enemy";
-    case Action::EnemyFire: return "Enemy fire once";
-    case Action::StartTrial: return "Start trial";
-    case Action::ToggleTurret: return "Toggle slow turret";
-    case Action::AcknowledgeProject: return "Acknowledge saved project";
-    case Action::AcknowledgeDiscovery: return "Acknowledge player-only event";
-    case Action::AcknowledgeTrace: return "Acknowledge CSV export";
-    case Action::AcknowledgeRestart: return "Acknowledge process restart";
+    case Action::HitEnemy: return "Hit sentinel";
+    case Action::EnemyFire: return "Sentinel fires";
+    case Action::StartTrial: return "Start run now";
+    case Action::StartCountdown: return "Start run";
+    case Action::RebootRelay: return "Reboot relay";
     }
     return "Action";
 }
 }
 
 Game::Game() {
+    worlds_.push_back(std::make_unique<World>());
+    world_ = worlds_.back().get();
     for (std::size_t i = 0; i < actors_.size(); ++i) {
         actors_[i] = std::make_unique<Actor>(); inventories_[i] = std::make_unique<Inventory>();
         weapons_.push_back(std::make_unique<Weapon>()); weapons_.push_back(std::make_unique<Weapon>());
@@ -67,10 +70,10 @@ Game::Game() {
     std::memcpy(originalAmmo_.data(), breakout_ammo_patchsite, originalAmmo_.size());
     std::memcpy(originalDamage_.data(), breakout_damage_patchsite, originalDamage_.size());
     std::memcpy(originalVault_.data(), breakout_vault_entry, originalVault_.size());
-    breakout_world_root = &world_;
+    breakout_world_root = world_;
     resetRoom();
 }
-Game::~Game() { if (breakout_world_root == &world_) breakout_world_root = nullptr; }
+Game::~Game() { if (breakout_world_root == world_) breakout_world_root = nullptr; }
 bool Game::ownsActor(const Actor* pointer) const {
     return pointer && std::any_of(actors_.begin(), actors_.end(), [pointer](const auto& object) { return pointer == object.get(); });
 }
@@ -81,8 +84,8 @@ bool Game::ownsWeapon(const Weapon* pointer) const {
     return pointer && std::any_of(weapons_.begin(), weapons_.end(), [pointer](const auto& object) { return pointer == object.get(); });
 }
 Actor* Game::player() const {
-    if (read(breakout_world_root) != &world_) return nullptr;
-    Actor* pointer = read(world_.player); return ownsActor(pointer) ? pointer : nullptr;
+    if (read(breakout_world_root) != world_) return nullptr;
+    Actor* pointer = read(world_->player); return ownsActor(pointer) ? pointer : nullptr;
 }
 Inventory* Game::inventory(const Actor* actor) const {
     if (!ownsActor(actor)) return nullptr;
@@ -93,22 +96,30 @@ Weapon* Game::equipped(const Actor* actor) const {
     auto* pointer = read(inv->equipped); return ownsWeapon(pointer) ? pointer : nullptr;
 }
 bool Game::validateActor(const Actor* actor) {
-    if (!ownsActor(actor)) { status_ = "Action suspended: invalid Actor pointer. Inspect the raw pointer in Live values."; return false; }
+    if (!ownsActor(actor)) { status_ = "Suspended: the player pointer is invalid. Restore it in ReClass or restart the room."; return false; }
     return true;
 }
 void Game::initializeWeapon(Weapon& weapon, const char* name, int damage, float speed, float cooldown) {
     weapon = {}; std::strncpy(weapon.name, name, sizeof(weapon.name)-1);
     write(weapon.damage, damage); write(weapon.projectileSpeed, speed); write(weapon.cooldown, cooldown);
 }
-void Game::setRoom(int room) { room_ = std::clamp(room, 1, roomCount); resetRoom(); }
+void Game::relocateWorld() {
+    // Allocate the new block before retiring the old one so the address really changes.
+    auto next = std::make_unique<World>(*world_);
+    next->corridorDistance = 0; next->doorOpen = 0;
+    world_ = next.get(); worlds_.push_back(std::move(next));
+    if (worlds_.size() > 32) worlds_.erase(worlds_.begin());
+    breakout_world_root = world_;
+}
+void Game::setRoom(int room) { room_ = std::clamp(room, 0, roomCount - 1); resetRoom(); }
 void Game::resetRoom() {
     // Reset only owned gameplay allocations; no teaching-code bytes are written.
-    world_ = {}; breakout_world_root = &world_; world_.player = actors_[0].get();
-    world_.enemies[0] = actors_[1].get(); world_.enemies[1] = actors_[2].get();
-    world_.room = room_; world_.remainingTime = 8; world_.corridorDistance = 580;
+    *world_ = {}; breakout_world_root = world_; world_->player = actors_[0].get();
+    world_->enemies[0] = actors_[1].get(); world_->enemies[1] = actors_[2].get();
+    world_->room = room_; world_->remainingTime = 8; world_->corridorDistance = room_ == 6 ? 0.0f : 580.0f;
     for (std::size_t i = 0; i < actors_.size(); ++i) {
         auto& a = *actors_[i]; a = {}; a.health = 100; a.ammo = 12; a.speed = 80;
-        a.charge = 40; a.x = i ? 550.0f : 70.0f; a.y = i ? 100.0f + 120.0f * float(i) : 180.0f;
+        a.charge = 40; a.x = i ? 550.0f : SpawnX; a.y = i ? 100.0f + 120.0f * float(i) : SpawnY;
         a.flags = AlarmFlag; a.faction = i ? EnemyFaction : PlayerFaction;
         std::strncpy(a.callsign, i ? "SENTINEL" : "ROOKIE", sizeof(a.callsign)-1);
         a.inventory = inventories_[i].get(); auto& inv = *inventories_[i]; inv = {};
@@ -117,54 +128,116 @@ void Game::resetRoom() {
         initializeWeapon(*inv.slots[1], "ARC", 7, 180, 0.6f);
     }
     if (room_ == 3) actors_[0]->speed = 60;
-    if (room_ == 10) actors_[0]->health = 50;
+    if (room_ == 4) actors_[0]->flags = AlarmFlag | MaintenanceFlag;
+    if (room_ == 11) actors_[0]->health = 50;
+    if (room_ == 10) { actors_[1]->x = 560; actors_[1]->y = 330; }
     targets_.clear();
     if (room_ == 1) {
-        for (int i = 0; i < 20; ++i) targets_.push_back({SceneObject::Kind::Target, 260.0f + float(i%5)*95, 65.0f + float(i/5)*85, 20, true, "Target " + std::to_string(i+1), 1});
-    } else if (room_ == 6) {
-        targets_.push_back({SceneObject::Kind::Target, 480, 140, 26, true, "Armor A", 30});
-        targets_.push_back({SceneObject::Kind::Target, 650, 260, 26, true, "Armor B (after swap)", 30});
-    } else if (room_ == 8 || room_ == 10 || room_ == 12) {
+        for (int i = 0; i < 20; ++i) targets_.push_back({SceneObject::Kind::Target, 260.0f + float(i%5)*95, 65.0f + float(i/5)*85, 20, true, "Drone " + std::to_string(i+1), 1});
+    } else if (room_ == 5) {
+        targets_.push_back({SceneObject::Kind::Target, 480, 140, 26, true, "Sentinel A", 30});
+        targets_.push_back({SceneObject::Kind::Target, 650, 260, 26, true, "Sentinel B", 30});
+    } else if (room_ == 8 || room_ == 11 || room_ == 13) {
         targets_.push_back({SceneObject::Kind::Target, 620, 180, 24, true, "Training wall", 100000});
     }
-    shots_ = hits_ = enemyHits_ = enemyShots_ = reloads_ = swaps_ = beforeSwap_ = afterSwap_ = unchangedHits_ = increasingShots_ = 0;
-    paused_ = true; primary_ = restored_ = complete_ = manual_ = enemyHookVerified_ = turret_ = hasAim_ = overrideAccepted_ = false;
+    shots_ = hits_ = enemyHits_ = enemyShots_ = swaps_ = beforeSwap_ = afterSwap_ = unchangedHits_ = increasingShots_ = links_ = 0;
+    primary_ = restored_ = complete_ = enemyHookVerified_ = hasAim_ = overrideAccepted_ = relayCounted_ = false;
+    downed_ = false; collapseX_ = fallTimer_ = 0;
     static std::mt19937 codes{std::random_device{}()};
     std::uniform_int_distribution<std::uint32_t> code(1000, 9999);
     overrideCode_ = code(codes);
     do decoyCode_ = code(codes); while (decoyCode_ == overrideCode_);
-    accumulator_ = 0; automaticTimer_ = 0; ticks_ = 0;
-    status_ = "Room reset: gameplay data reset; any external code patches are unchanged. Simulation paused.";
+    accumulator_ = 0; hazardTimer_ = enemyTimer_ = countdown_ = 0; ticks_ = 0;
+    fail_.clear();
+    status_ = "Room ready. External code patches are unchanged by a restart.";
 }
+// Room 3: back to the start line with an intact bridge and a full timer.
+void Game::beginRun(bool countdown) {
+    Actor* a = player(); if (!a) return;
+    write(a->x, SpawnX); write(a->y, SpawnY); write(world_->remainingTime, 8.0f);
+    write(world_->corridorDistance, 580.0f);
+    downed_ = false; fallTimer_ = 0; collapseX_ = 0; primary_ = complete_ = false;
+    countdown_ = countdown ? 3.0f : 0.0f;
+    write(world_->trialRunning, std::uint8_t(countdown ? 0 : 1));
+    status_ = countdown ? "Get ready..." : "GO!";
+}
+void Game::respawn(const std::string& reason) {
+    Actor* a = player(); if (!a) return;
+    write(a->health, std::int32_t(room_ == 11 ? 50 : 100));
+    write(a->x, SpawnX); write(a->y, SpawnY);
+    write(world_->trialRunning, std::uint8_t(0));
+    countdown_ = 0; hazardTimer_ = 0;
+    fail_ = reason; ++failSerial_; status_ = reason;
+}
+
 std::vector<ActionDefinition> Game::actions() const {
-    std::vector<Action> selected{Action::AdvanceTick};
+    // Shooting works everywhere so ROOKIE's ammo can always be found with an exact scan.
+    std::vector<Action> selected{Action::AdvanceTick, Action::FireOnce};
     switch (room_) {
-    case 1: selected.insert(selected.end(), {Action::FireOnce, Action::Reload}); break;
     case 2: selected.insert(selected.end(), {Action::ChargeOnce, Action::DrainOnce, Action::ActivateReactor}); break;
-    case 3: selected.push_back(Action::StartTrial); break;
-    case 4: selected.insert(selected.end(), {Action::ToggleKeycard, Action::TogglePower, Action::ToggleAlarm, Action::EvaluateDoor}); break;
-    case 5: selected.insert(selected.end(), {Action::EvaluateDoor, Action::AcknowledgeProject}); break;
-    case 6: selected.insert(selected.end(), {Action::FireOnce, Action::SwapWeapon}); break;
-    case 7: selected.insert(selected.end(), {Action::TakeOneHit, Action::ToggleTurret}); break;
-    case 8: selected.push_back(Action::FireOnce); break;
-    case 9: selected.insert(selected.end(), {Action::TakeOneHit, Action::HitEnemy, Action::EvaluateDoor}); break;
-    case 10: selected.insert(selected.end(), {Action::FireOnce, Action::EnemyFire}); break;
-    case 11: selected.insert(selected.end(), {Action::EvaluateDoor, Action::ToggleKeycard, Action::ToggleAlarm, Action::AcknowledgeTrace}); break;
-    case 12: selected.insert(selected.end(), {Action::FireOnce, Action::AcknowledgeRestart}); break;
+    case 3: selected.insert(selected.end(), {Action::StartTrial, Action::StartCountdown}); break;
+    case 4: selected.insert(selected.end(), {Action::ToggleAlarm, Action::EvaluateDoor}); break;
+    case 5: selected.push_back(Action::SwapWeapon); break;
+    case 6: selected.push_back(Action::RebootRelay); break;
+    case 7: selected.push_back(Action::TakeOneHit); break;
+    case 9: case 12: selected.push_back(Action::EvaluateDoor); break;
+    case 10: selected.insert(selected.end(), {Action::TakeOneHit, Action::HitEnemy, Action::EvaluateDoor}); break;
+    case 11: selected.push_back(Action::EnemyFire); break;
+    default: break;
     }
     std::vector<ActionDefinition> result;
-    for (auto action : selected) {
-        std::string label = actionLabel(action);
-        if (room_ == 9 && action == Action::TakeOneHit) label = "Hit player";
-        if (action == Action::ToggleKeycard) label = "Invalidate keycard";
-        if (action == Action::TogglePower) label = "Cut power bit";
-        if (action == Action::EvaluateDoor && room_ == 5) label = "Scan badge";
-        if (action == Action::EvaluateDoor && room_ == 9) label = "Submit override";
-        if (action == Action::EvaluateDoor && room_ == 11) label = "Try vault";
-        result.push_back({action, label, true});
+    for (auto action : selected) result.push_back({action, actionLabel(action), true});
+    return result;
+}
+std::vector<Zone> Game::layoutZones(int room) {
+    std::vector<Zone> result;
+    const auto pad = [&](const char* id, const char* label, float x, float y, float w, float h) { result.push_back({id, label, x, y, w, h, false, Action::AdvanceTick, false}); };
+    const auto console = [&](const char* id, const char* label, float x, float y, float w, float h, Action action) { result.push_back({id, label, x, y, w, h, true, action, false}); };
+    switch (room) {
+    case 2:
+        pad("charge", "CHARGE", 200, 70, 90, 70); pad("drain", "DRAIN", 200, 260, 90, 70);
+        console("reactor", "Activate reactor", 520, 150, 50, 60, Action::ActivateReactor); break;
+    case 4:
+        console("switch", "Flip alarm switch", 300, 30, 60, 50, Action::ToggleAlarm);
+        console("door", "Open blast door", 560, 250, 50, 50, Action::EvaluateDoor); break;
+    case 5: console("rack", "Swap weapon", 120, 300, 80, 60, Action::SwapWeapon); break;
+    case 6: console("relay", "Reboot relay (moves its control block)", 300, 30, 90, 60, Action::RebootRelay); break;
+    case 7: pad("turret", "TURRET ZONE", 440, 0, 360, 400); break;
+    case 9: pad("scan", "SCAN PAD", 470, 150, 60, 60); break;
+    case 10:
+        pad("press", "PRESS", 340, 300, 120, 60);
+        console("console", "Submit override code", 300, 40, 200, 64, Action::EvaluateDoor); break;
+    case 12: console("vault", "Try vault", 560, 250, 50, 50, Action::EvaluateDoor); break;
+    default: break;
     }
     return result;
 }
+namespace {
+// Consoles are usable from just outside their footprint; pads need you on them.
+bool contains(const Zone& zone, float x, float y) {
+    const float reach = zone.interact ? 28.0f : 0.0f;
+    return x >= zone.x - reach && x <= zone.x + zone.w + reach && y >= zone.y - reach && y <= zone.y + zone.h + reach;
+}
+}
+std::vector<Zone> Game::zones() const {
+    auto result = layoutZones(room_);
+    if (const Actor* a = player()) {
+        const float x = read(a->x), y = read(a->y);
+        for (auto& zone : result) zone.occupied = std::isfinite(x) && std::isfinite(y) && contains(zone, x, y);
+    }
+    return result;
+}
+bool Game::inZone(const Actor* actor, const char* id) const {
+    const float x = read(actor->x), y = read(actor->y);
+    if (!std::isfinite(x) || !std::isfinite(y)) return false;
+    for (const auto& zone : layoutZones(room_)) if (zone.id == id) return contains(zone, x, y);
+    return false;
+}
+bool Game::interaction(Zone& found) const {
+    for (const auto& zone : zones()) if (zone.interact && zone.occupied) { found = zone; return true; }
+    return false;
+}
+
 bool Game::perform(Action action) {
     const auto offered = actions();
     if (std::none_of(offered.begin(), offered.end(), [action](const auto& d) { return d.action == action && d.available; })) {
@@ -176,54 +249,55 @@ bool Game::perform(Action action) {
     bool result = true;
     switch (action) {
     case Action::FireOnce: result = fire(a, false); hasAim_ = false; break;
-    case Action::Reload: write(a->ammo, std::int32_t(12)); ++reloads_; status_ = "Reloaded to 12. Reset room to start a fresh completion attempt."; break;
     case Action::ChargeOnce: case Action::DrainOnce: {
-        float charge = read(a->charge);
-        if (!std::isfinite(charge)) { status_ = "Charge action suspended: charge is non-finite (raw bytes shown)."; return false; }
-        float next = charge + (action == Action::ChargeOnce ? 5.0f : -5.0f);
-        if (!std::isfinite(next)) { status_ = "Charge action suspended: result would be non-finite."; return false; }
-        // Normal controls cannot reach the reactor threshold. Keep externally
-        // edited over-limit values usable for the lesson's 95 -> 100 check.
-        if (action == Action::ChargeOnce && charge <= NormalChargeLimit) next = std::min(next, NormalChargeLimit);
-        write(a->charge, next);
-        status_ = action == Action::DrainOnce ? "Charge decreased by 5." :
-            next == charge ? "Normal charging is capped at 60. Edit the charge float to reach 90." : "Charge increased by 5.";
+        // Locals of scanned fields are doubles: this file is built without optimization,
+        // so a float/int local would linger on the stack as a scan decoy.
+        const double charge = read(a->charge);
+        if (!std::isfinite(charge)) { status_ = "Charge is not a valid number."; return false; }
+        double next = charge + (action == Action::ChargeOnce ? 5.0 : -5.0);
+        // Normal charging stops at the cap; externally edited values stay authoritative.
+        if (action == Action::ChargeOnce && charge <= NormalChargeLimit) next = std::min<double>(next, NormalChargeLimit);
+        write(a->charge, static_cast<float>(std::max(0.0, next)));
         break;
     }
     case Action::ActivateReactor:
-        if (!std::isfinite(read(a->charge))) { status_ = "Reactor suspended: non-finite charge."; return false; }
-        primary_ = read(a->charge) >= 90; status_ = primary_ ? "Reactor activated." : "Reactor requires charge of at least 90."; break;
-    case Action::ToggleKeycard: write(a->keycard, std::uint8_t(0)); status_ = "Keycard invalidated. Restore access by editing its byte in ReClass."; break;
-    case Action::TogglePower: write(a->flags, read(a->flags) & ~PowerFlag); status_ = "Power bit cleared; other flag bits preserved. Restore power in ReClass."; break;
-    case Action::ToggleAlarm: write(a->flags, read(a->flags) ^ AlarmFlag); status_ = "Alarm bit toggled; other flag bits preserved."; break;
+        if (!std::isfinite(read(a->charge))) { status_ = "Reactor refuses a non-finite charge."; return false; }
+        primary_ = read(a->charge) >= 90;
+        status_ = primary_ ? "Reactor online." : "Not enough charge: the reactor needs 90%.";
+        break;
+    case Action::ToggleAlarm: write(a->flags, read(a->flags) ^ AlarmFlag); status_ = (read(a->flags) & AlarmFlag) ? "Alarm armed." : "Alarm off."; break;
     case Action::EvaluateDoor: result = evaluateDoor(); break;
     case Action::SwapWeapon: {
         auto* inv = inventory(a);
-        if (!inv) { status_ = "Swap suspended: invalid Inventory pointer."; return false; }
+        if (!inv) { status_ = "Swap failed: the inventory pointer is invalid."; return false; }
         // Allocate before replacing, retaining the previous owned object for safe pointer inspection.
         auto replacement = std::make_unique<Weapon>();
-        initializeWeapon(*replacement, swaps_ % 2 == 0 ? "ARC replacement" : "PULSE replacement", 7, 180, 0.6f);
+        initializeWeapon(*replacement, swaps_ % 2 == 0 ? "ARC" : "PULSE", 7, 180, 0.6f);
         auto* pointer = replacement.get(); weapons_.push_back(std::move(replacement));
         write(inv->slots[(swaps_ + 1) % 2], pointer); write(inv->equipped, pointer); ++swaps_;
-        status_ = "Equipped Weapon replaced. Reacquire its address through Inventory.equipped."; break;
+        status_ = "New weapon equipped: it is a new object at a new address."; break;
     }
     case Action::TakeOneHit: result = hit(a); break;
     case Action::HitEnemy: {
-        Actor* enemy = read(world_.enemies[0]); if (!validateActor(enemy)) return false;
-        breakout_apply_damage(enemy, decoyCode_); ++enemyHits_; status_ = "Enemy hit once through the shared damage routine."; break;
+        Actor* enemy = read(world_->enemies[0]); if (!validateActor(enemy)) return false;
+        breakout_apply_damage(enemy, decoyCode_); ++enemyHits_;
+        if (read(enemy->health) <= 0) write(enemy->health, std::int32_t(100));
+        status_ = "The press hits the sentinel."; break;
     }
     case Action::EnemyFire: {
-        Actor* enemy = read(world_.enemies[0]); if (!validateActor(enemy)) return false;
+        Actor* enemy = read(world_->enemies[0]); if (!validateActor(enemy)) return false;
+        if (read(enemy->ammo) <= 0) write(enemy->ammo, std::int32_t(12));
         result = fire(enemy, true); break;
     }
     case Action::StartTrial:
-        if (!std::isfinite(read(a->speed))) { status_ = "Trial suspended: speed is non-finite."; return false; }
-        write(a->x, 70.0f); write(a->y, 180.0f); write(world_.remainingTime, 8.0f);
-        write(world_.corridorDistance, 580.0f); write(world_.trialRunning, std::uint8_t(1));
-        primary_ = complete_ = false; status_ = "Trial started. Move right while running, or hold right and advance a tick."; break;
-    case Action::ToggleTurret: turret_ = !turret_; status_ = turret_ ? "Slow turret enabled; it fires only while simulation advances." : "Slow turret disabled."; break;
-    case Action::AcknowledgeProject: case Action::AcknowledgeDiscovery: case Action::AcknowledgeTrace: case Action::AcknowledgeRestart:
-        manual_ = true; status_ = "Guided manual step acknowledged. Observations cannot prove which ReClass technique was used."; break;
+        if (!std::isfinite(read(a->speed))) { status_ = "Speed is not a valid number."; return false; }
+        beginRun(false); break;
+    case Action::StartCountdown:
+        if (read(world_->trialRunning) || countdown_ > 0 || fallTimer_ > 0) return false;
+        beginRun(true); break;
+    case Action::RebootRelay:
+        relocateWorld(); relayCounted_ = false;
+        status_ = "Relay rebooted: its control block moved to a new address."; break;
     case Action::AdvanceTick: break;
     }
     updateCompletion(); return result;
@@ -231,40 +305,45 @@ bool Game::perform(Action action) {
 
 bool Game::fire(Actor* actor, bool enemy) {
     if (!validateActor(actor)) return false;
-    if (read(actor->ammo) <= 0) { status_ = "Magazine empty: edit ammo or reset the room."; return false; }
+    if (read(actor->ammo) <= 0) { status_ = "Out of ammo."; return false; }
     auto* weapon = equipped(actor);
-    if (!weapon) { status_ = "Fire suspended: invalid Inventory/equipped Weapon pointer (raw pointers shown)."; return false; }
+    if (!weapon) { status_ = "Can't fire: the equipped weapon pointer is invalid."; return false; }
     if (!std::isfinite(read(weapon->projectileSpeed)) || !std::isfinite(read(weapon->cooldown))) {
-        status_ = "Fire suspended: Weapon projectile speed or cooldown is non-finite."; return false;
+        status_ = "Can't fire: the weapon's speed or cooldown is not a valid number."; return false;
     }
     Actor* p = player();
-    int oldAmmo = read(actor->ammo), oldHealth = read(actor->health), playerHealth = p ? read(p->health) : 0;
+    const double oldAmmo = read(actor->ammo), oldHealth = read(actor->health), playerHealth = p ? read(p->health) : 0;
     breakout_decrement_ammo(actor);
-    int newAmmo = read(actor->ammo), newHealth = read(actor->health);
+    const double newAmmo = read(actor->ammo), newHealth = read(actor->health);
     if (enemy) {
         ++enemyShots_;
-        if (room_ == 10 && std::int64_t(newAmmo) == std::int64_t(oldAmmo)-1 && newHealth == oldHealth && p && read(p->health) == playerHealth) enemyHookVerified_ = true;
-        status_ = "Enemy fired once through the same ammo routine; player health " + std::to_string(p ? read(p->health) : 0) + ".";
+        // Only a sentinel shot fired while the hook is live proves it spares the sentinel.
+        if (room_ == 11 && primary_ && std::int64_t(newAmmo) == std::int64_t(oldAmmo)-1 && newHealth == oldHealth && p && read(p->health) == playerHealth) enemyHookVerified_ = true;
+        status_ = "The sentinel fired.";
     } else {
         ++shots_;
-        if (room_ == 8 || room_ == 12) {
+        if (room_ == 8 || room_ == 13) {
             if (!primary_) {
                 if (std::int64_t(newAmmo) == std::int64_t(oldAmmo)+1) ++increasingShots_; else increasingShots_ = 0;
                 if (increasingShots_ >= 3) primary_ = true;
             } else if (std::int64_t(newAmmo) == std::int64_t(oldAmmo)-1) restored_ = true;
         }
-        if (room_ == 10) {
+        if (room_ == 11) {
             if (!primary_ && std::int64_t(newAmmo) == std::int64_t(oldAmmo)-1 && std::int64_t(newHealth) == std::int64_t(oldHealth)+5) primary_ = true;
             else if (primary_ && enemyHookVerified_ && std::int64_t(newAmmo) == std::int64_t(oldAmmo)-1 && newHealth == oldHealth) restored_ = true;
         }
         SceneObject* target = nullptr;
+        const auto eligible = [&](const SceneObject& candidate) {
+            // Sentinel B steps out only after a weapon swap.
+            return candidate.active && (room_ != 5 || (&candidate == &targets_[0] ? swaps_ == 0 : swaps_ > 0));
+        };
         if (!hasAim_) {
-            for (auto& candidate : targets_) if (candidate.active && (room_ != 6 || (&candidate == &targets_[0] ? swaps_ == 0 : swaps_ > 0))) { target = &candidate; break; }
+            for (auto& candidate : targets_) if (eligible(candidate)) { target = &candidate; break; }
         } else if (p && std::isfinite(read(p->x)) && std::isfinite(read(p->y)) && std::isfinite(aimX_) && std::isfinite(aimY_)) {
             float px = read(p->x), py = read(p->y), dx = aimX_ - px, dy = aimY_ - py;
             float length = std::sqrt(dx*dx + dy*dy), best = std::numeric_limits<float>::max();
             if (length > 0.001f) for (auto& candidate : targets_) {
-                if (!candidate.active || (room_ == 6 && (&candidate == &targets_[0] ? swaps_ != 0 : swaps_ == 0))) continue;
+                if (!eligible(candidate)) continue;
                 float tx = candidate.x-px, ty = candidate.y-py;
                 float along = (tx*dx + ty*dy)/length, across = std::fabs(tx*dy - ty*dx)/length;
                 if (along >= 0 && across <= candidate.radius && along < best) { best = along; target = &candidate; }
@@ -272,42 +351,43 @@ bool Game::fire(Actor* actor, bool enemy) {
         }
         if (target) {
             int damage = read(weapon->damage);
-            if (room_ != 6 || damage >= 20) {
+            if (room_ != 5 || damage >= 20) {
                 const std::int64_t remaining = std::int64_t(target->health) - std::max(0, damage);
                 target->health = int(std::max<std::int64_t>(0, remaining));
-                if (target->health == 0) { target->active = false; if (room_ == 6) { if (swaps_ == 0) ++beforeSwap_; else ++afterSwap_; } }
+                if (target->health == 0) { target->active = false; if (room_ == 5) { if (swaps_ == 0) ++beforeSwap_; else ++afterSwap_; } }
             }
         }
-        status_ = "Fired exactly once: ammo " + std::to_string(oldAmmo) + " -> " + std::to_string(newAmmo) + ", health " + std::to_string(oldHealth) + " -> " + std::to_string(newHealth) + ".";
-        if (room_ == 6 && target && read(weapon->damage) < 20) status_ += " Armor requires damage >= 20.";
+        status_ = "Ammo " + std::to_string(static_cast<long long>(oldAmmo)) + " -> " + std::to_string(static_cast<long long>(newAmmo)) + ".";
+        if (room_ == 5 && target && read(weapon->damage) < 20) status_ = "The armor deflects anything under 20 damage.";
     }
     updateCompletion(); return true;
 }
 bool Game::hit(Actor* actor) {
     if (!validateActor(actor)) return false;
-    int before = read(actor->health); breakout_apply_damage(actor, overrideCode_); int after = read(actor->health); ++hits_;
+    const double before = read(actor->health); breakout_apply_damage(actor, overrideCode_); const double after = read(actor->health); ++hits_;
     if (room_ == 7) {
         if (!primary_) { unchangedHits_ = after == before ? unchangedHits_+1 : 0; if (unchangedHits_ >= 3) primary_ = true; }
         else if (std::int64_t(after) == std::int64_t(before)-10) restored_ = true;
     }
-    status_ = "One hit: health " + std::to_string(before) + " -> " + std::to_string(after) + ".";
-    updateCompletion(); return true;
+    status_ = "Hit: health " + std::to_string(static_cast<long long>(before)) + " -> " + std::to_string(static_cast<long long>(after)) + ".";
+    updateCompletion();
+    if (after <= 0 && !complete_) respawn("Destroyed. ROOKIE respawns with full health.");
+    return true;
 }
 bool Game::evaluateDoor() {
     Actor* a = player(); if (!validateActor(a)) return false;
     bool accepted = false;
-    if (room_ == 4) accepted = read(a->keycard) == 1 && (read(a->flags) & PowerFlag) != 0 && (read(a->flags) & AlarmFlag) == 0;
-    else if (room_ == 5) accepted = breakout_scan_badge(a) != 0;
-    else if (room_ == 9) {
+    if (room_ == 4) {
+        const auto flags = read(a->flags);
+        accepted = read(a->keycard) == 1 && (flags & PowerFlag) && !(flags & AlarmFlag) && (flags & MaintenanceFlag);
+    } else if (room_ == 9) accepted = breakout_scan_badge(a) != 0;
+    else if (room_ == 10) {
         overrideAccepted_ = read(a->clearance) == overrideCode_;
-        status_ = overrideAccepted_ ? "Override accepted: the damage press is unlocked." : "Override rejected: player clearance does not match the code the press carries for you.";
+        status_ = overrideAccepted_ ? "Override accepted." : "Override rejected: your clearance doesn't match the code the press carries for you.";
         updateCompletion(); return true;
-    }
-    else accepted = breakout_evaluate_vault(a) != 0;
-    write(world_.doorOpen, std::uint8_t(accepted)); primary_ = accepted;
-    status_ = accepted ? "Door accepted the current authoritative inputs." :
-        room_ == 5 ? "Badge rejected. The scanner compares your callsign and clearance with values stored in its own code." :
-        "Door denied entry. Inspect keycard, clearance, callsign and alarm inputs.";
+    } else accepted = breakout_evaluate_vault(a) != 0;
+    write(world_->doorOpen, std::uint8_t(accepted)); primary_ = accepted;
+    status_ = accepted ? "Access granted." : room_ == 9 ? "Badge rejected." : "Access denied.";
     updateCompletion(); return true;
 }
 void Game::update(double elapsedSeconds, float movementX, float movementY) {
@@ -324,53 +404,104 @@ void Game::tick(float movementX, float movementY) {
     Actor* a = player(); if (!validateActor(a)) return;
     const float speed = read(a->speed), x = read(a->x), y = read(a->y);
     if (!std::isfinite(speed) || !std::isfinite(x) || !std::isfinite(y) || !std::isfinite(movementX) || !std::isfinite(movementY)) {
-        status_ = "Tick suspended: non-finite speed, position or movement (raw field bytes shown)."; return;
+        status_ = "Frozen: speed or position is not a valid number."; return;
+    }
+    ++ticks_;
+    if (room_ == 3) {
+        // While ROOKIE falls, and after, nothing moves until the player starts again.
+        if (fallTimer_ > 0) { fallTimer_ -= fixedStep; if (fallTimer_ <= 0) { fallTimer_ = 0; downed_ = true; } updateCompletion(); return; }
+        if (downed_) { updateCompletion(); return; }
+        if (countdown_ > 0) {
+            // Hold still for 3-2-1, then the run starts.
+            countdown_ -= fixedStep;
+            if (countdown_ <= 0) { countdown_ = 0; write(world_->trialRunning, std::uint8_t(1)); status_ = "GO!"; }
+            updateCompletion(); return;
+        }
     }
     const float norm = std::sqrt(movementX*movementX + movementY*movementY);
     if (norm > 1) { movementX /= norm; movementY /= norm; }
     const double nextX = double(x) + double(speed)*movementX*fixedStep;
     const double nextY = double(y) + double(speed)*movementY*fixedStep;
-    if (!std::isfinite(nextX) || !std::isfinite(nextY)) { status_ = "Tick suspended: movement result is non-finite."; return; }
-    if (room_ == 3 && read(world_.trialRunning)) {
-        float time = read(world_.remainingTime);
-        if (!std::isfinite(time)) { status_ = "Tick suspended: trial time is non-finite."; return; }
-        if (time <= 0) { write(world_.trialRunning, std::uint8_t(0)); status_ = "Trial expired. Start trial to try again."; return; }
-        // The trial bridge spans y 145..215.
-        write(a->x, float(std::clamp(nextX, 30.0, 770.0))); write(a->y, float(std::clamp(nextY, 160.0, 200.0)));
-        write(world_.remainingTime, std::max(0.0f, time-fixedStep));
-        write(world_.corridorDistance, std::max(0.0f, 650.0f-read(a->x)));
-        if (read(a->x) >= 650 && time >= fixedStep) { primary_ = true; write(world_.trialRunning, std::uint8_t(0)); status_ = "Reached the exit before time expired."; }
-    } else {
-        // A closed door is a wall; the door opens only from the authoritative decision byte.
-        const bool sealed = (room_ == 4 || room_ == 5 || room_ == 11) && !read(world_.doorOpen);
-        const double minX = sealed && x > 650 ? 690.0 : 30.0, maxX = sealed && x <= 650 ? 610.0 : 770.0;
-        write(a->x, float(std::clamp(nextX, minX, maxX))); write(a->y, float(std::clamp(nextY, 30.0, 370.0)));
+    if (!std::isfinite(nextX) || !std::isfinite(nextY)) { status_ = "Frozen: movement result is not a valid number."; return; }
+    // A closed door is a wall; it opens only from the authoritative decision byte.
+    const bool sealed = (room_ == 4 || room_ == 6 || room_ == 9 || room_ == 12) && !read(world_->doorOpen);
+    const double minX = sealed && x > 650 ? 690.0 : 30.0, maxX = sealed && x <= 650 ? 610.0 : 770.0;
+    const double minY = room_ == 3 ? 160.0 : 30.0, maxY = room_ == 3 ? 200.0 : 370.0;
+    write(a->x, float(std::clamp(nextX, minX, maxX))); write(a->y, float(std::clamp(nextY, minY, maxY)));
+    switch (room_) {
+    case 2:
+        if (inZone(a, "charge")) { const double c = read(a->charge); if (std::isfinite(c) && c < NormalChargeLimit) write(a->charge, static_cast<float>(std::min<double>(NormalChargeLimit, c + 10.0 * fixedStep))); }
+        if (inZone(a, "drain")) { const double c = read(a->charge); if (std::isfinite(c)) write(a->charge, static_cast<float>(std::max(0.0, c - 10.0 * fixedStep))); }
+        break;
+    case 3:
+        if (read(world_->trialRunning)) {
+            float time = read(world_->remainingTime);
+            if (!std::isfinite(time)) { status_ = "Frozen: the timer is not a valid number."; return; }
+            time = std::max(0.0f, time - fixedStep);
+            write(world_->remainingTime, time);
+            write(world_->corridorDistance, std::max(0.0f, 650.0f - read(a->x)));
+            // The collapse starts at the bridge edge and accelerates: an idle robot falls after ~1.8 s, and at speed 60 the 8 s timer runs out first.
+            const float elapsed = 8.0f - time;
+            collapseX_ = std::min(685.0f, 45.0f + 7.5f * elapsed * elapsed);
+            if (read(a->x) >= 650) { primary_ = true; write(world_->trialRunning, std::uint8_t(0)); status_ = "Made it across!"; }
+            else if (collapseX_ >= read(a->x) || time <= 0) {
+                write(world_->trialRunning, std::uint8_t(0));
+                // The floor under ROOKIE goes with him.
+                collapseX_ = std::min(685.0f, std::max(collapseX_, read(a->x) + 30));
+                fallTimer_ = FallSeconds;
+                std::ostringstream reason;
+                reason << std::setprecision(3) << "The bridge fell away under ROOKIE. At speed " << read(a->speed) << " the crossing takes "
+                       << std::setprecision(2) << std::fixed << 580.0f / std::max(0.001f, read(a->speed)) << " s; the bridge lasts 8.";
+                fail_ = reason.str(); ++failSerial_; status_ = fail_;
+            }
+        }
+        break;
+    case 6: {
+        // The relay door follows its control block's power value.
+        const float power = read(world_->corridorDistance);
+        const bool powered = std::isfinite(power) && power >= 100;
+        write(world_->doorOpen, std::uint8_t(powered));
+        if (powered && !relayCounted_) { relayCounted_ = true; ++links_; status_ = "Relay link " + std::to_string(links_) + " / 3."; }
+        break;
     }
-    // The gate scanner reads the badge every tick while the player stands on its pad.
-    if (room_ == 5 && onScanner(a)) breakout_scan_badge(a);
-    ++ticks_; automaticTimer_ += fixedStep;
-    if (automaticTimer_ >= 2) {
-        automaticTimer_ -= 2;
-        if (room_ == 7 && turret_) hit(a);
-        if (room_ == 2) { float charge = read(a->charge); if (std::isfinite(charge) && charge < NormalChargeLimit) write(a->charge, std::min(NormalChargeLimit, charge+1.0f)); }
+    case 7:
+        if (inZone(a, "turret")) { hazardTimer_ += fixedStep; if (hazardTimer_ >= 1.0f) { hazardTimer_ = 0; hit(a); } }
+        else hazardTimer_ = 0.6f;
+        break;
+    case 9:
+        // The gate scanner reads the badge every tick while the player stands on its pad.
+        if (inZone(a, "scan") && breakout_scan_badge(a) && !primary_) {
+            write(world_->doorOpen, std::uint8_t(1)); primary_ = true; status_ = "Access granted.";
+        }
+        break;
+    case 10:
+        // The press swings at the sentinel, then at you, while you stand on its plate.
+        if (inZone(a, "press")) {
+            const float before = hazardTimer_;
+            hazardTimer_ += fixedStep;
+            if (before < .8f && hazardTimer_ >= .8f) perform(Action::HitEnemy);
+            if (hazardTimer_ >= 1.6f) { hazardTimer_ = 0; hit(a); }
+        } else hazardTimer_ = 0;
+        break;
+    case 11:
+        enemyTimer_ += fixedStep;
+        if (enemyTimer_ >= 2.5f) { enemyTimer_ = 0; perform(Action::EnemyFire); }
+        break;
+    default: break;
     }
     updateCompletion();
 }
-bool Game::onScanner(const Actor* actor) const {
-    const float x = read(actor->x), y = read(actor->y);
-    return x >= 470 && x <= 530 && y >= 150 && y <= 210;
-}
 void Game::updateCompletion() {
     switch (room_) {
-    case 1: primary_ = reloads_ == 0 && std::none_of(targets_.begin(), targets_.end(), [](const auto& t) { return t.active; }); break;
-    case 6: primary_ = beforeSwap_ > 0 && swaps_ > 0 && afterSwap_ > 0; break;
-    case 9: primary_ = hits_ > 0 && enemyHits_ > 0 && overrideAccepted_; break;
+    case 1: primary_ = std::none_of(targets_.begin(), targets_.end(), [](const auto& t) { return t.active; }); break;
+    case 5: primary_ = beforeSwap_ > 0 && swaps_ > 0 && afterSwap_ > 0; break;
+    case 6: primary_ = links_ >= 3; break;
+    case 10: primary_ = hits_ > 0 && enemyHits_ > 0 && overrideAccepted_; break;
     default: break;
     }
-    if (room_ == 7 || room_ == 8) complete_ = primary_ && restored_;
-    else if (room_ == 10) complete_ = primary_ && enemyHookVerified_ && restored_;
-    else if (room_ == 12) complete_ = primary_ && restored_ && manual_;
-    else if (room_ == 5 || room_ == 11) complete_ = primary_ && manual_;
+    if (room_ == 0) complete_ = false;
+    else if (room_ == 7 || room_ == 8 || room_ == 13) complete_ = primary_ && restored_;
+    else if (room_ == 11) complete_ = primary_ && enemyHookVerified_ && restored_;
     else complete_ = primary_;
 }
 
@@ -378,7 +509,7 @@ RenderSnapshot Game::renderSnapshot() const {
     RenderSnapshot result;
     Actor* a = player(); result.playerValid = a != nullptr;
     if (a) {
-        result.playerX = renderFloat(read(a->x), 70); result.playerY = renderFloat(read(a->y), 180);
+        result.playerX = renderFloat(read(a->x), SpawnX); result.playerY = renderFloat(read(a->y), SpawnY);
         result.playerSpeed = renderFloat(read(a->speed)); result.charge = renderFloat(read(a->charge));
         result.health = read(a->health); result.ammo = read(a->ammo);
         result.playerValid = std::isfinite(read(a->x)) && std::isfinite(read(a->y));
@@ -388,23 +519,27 @@ RenderSnapshot Game::renderSnapshot() const {
             result.weaponName = stringValue(weapon->name, sizeof(weapon->name));
             result.weaponDamage = read(weapon->damage); result.projectileSpeed = renderFloat(read(weapon->projectileSpeed), 260);
         }
+        result.scanning = room_ == 9 && inZone(a, "scan");
     }
-    if (Actor* enemy = read(world_.enemies[0]); ownsActor(enemy)) { result.enemyHealth = read(enemy->health); result.enemyAmmo = read(enemy->ammo); }
+    if (Actor* enemy = read(world_->enemies[0]); ownsActor(enemy)) { result.enemyHealth = read(enemy->health); result.enemyAmmo = read(enemy->ammo); }
     result.shots = shots_; result.hits = hits_; result.enemyHits = enemyHits_; result.enemyShots = enemyShots_;
-    result.swaps = swaps_; result.turret = turret_; result.primary = primary_; result.complete = complete_;
-    result.scanning = room_ == 5 && a && onScanner(a);
-    result.remainingTime = renderFloat(read(world_.remainingTime));
-    result.corridorDistance = renderFloat(read(world_.corridorDistance));
-    result.doorOpen = read(world_.doorOpen) != 0; result.trialRunning = read(world_.trialRunning) != 0;
+    result.swaps = swaps_; result.primary = primary_; result.complete = complete_; result.links = links_;
+    result.paused = paused_; result.countdown = countdown_; result.collapseX = collapseX_;
+    result.fall = fallTimer_ > 0 ? 1 - fallTimer_ / FallSeconds : downed_ ? 1.0f : 0.0f; result.downed = downed_; result.fail = fail_; result.failSerial = failSerial_;
+    result.remainingTime = renderFloat(read(world_->remainingTime));
+    result.corridorDistance = renderFloat(read(world_->corridorDistance));
+    result.relayPower = room_ == 6 ? result.corridorDistance : 0;
+    result.doorOpen = read(world_->doorOpen) != 0; result.trialRunning = read(world_->trialRunning) != 0;
     result.objects = targets_;
-    if (room_ == 9 || room_ == 10) {
-        Actor* enemy = read(world_.enemies[0]);
-        if (ownsActor(enemy)) result.objects.push_back({SceneObject::Kind::Enemy, renderFloat(read(enemy->x), 550), renderFloat(read(enemy->y), 220), 24, true, "Enemy (faction " + std::to_string(read(enemy->faction)) + ")", read(enemy->health)});
+    result.zones = zones();
+    if (room_ == 10 || room_ == 11) {
+        Actor* enemy = read(world_->enemies[0]);
+        if (ownsActor(enemy)) result.objects.push_back({SceneObject::Kind::Enemy, renderFloat(read(enemy->x), 550), renderFloat(read(enemy->y), 220), 24, true, "Sentinel", read(enemy->health)});
     }
-    if (room_ == 7) result.objects.push_back({SceneObject::Kind::Turret, 700, 90, 22, turret_, turret_ ? "Turret armed" : "Turret idle", 0});
-    if (room_ == 2) result.objects.push_back({SceneObject::Kind::Reactor, 640, 180, 40, !primary_, "Reactor: requires charge 90", 0});
-    if (room_ == 3) result.objects.push_back({SceneObject::Kind::Exit, 650, 180, 35, !primary_, "Trial exit", 0});
-    if (room_ == 4 || room_ == 5 || room_ == 11) result.objects.push_back({SceneObject::Kind::Door, 650, 180, 40, !result.doorOpen, result.doorOpen ? "Door open" : "Door locked", 0});
+    if (room_ == 7) result.objects.push_back({SceneObject::Kind::Turret, 700, 90, 22, a && inZone(a, "turret"), "Turret", 0});
+    if (room_ == 2) result.objects.push_back({SceneObject::Kind::Reactor, 640, 180, 40, !primary_, "Reactor", 0});
+    if (room_ == 3) result.objects.push_back({SceneObject::Kind::Exit, 650, 180, 35, !primary_, "Exit", 0});
+    if (room_ == 4 || room_ == 6 || room_ == 9 || room_ == 12) result.objects.push_back({SceneObject::Kind::Door, 650, 180, 40, !result.doorOpen, result.doorOpen ? "Open" : "Locked", 0});
     return result;
 }
 std::vector<FieldSnapshot> Game::fields() const {
@@ -422,24 +557,25 @@ std::vector<FieldSnapshot> Game::fields() const {
         result.push_back({label, type, display.str(), exact.str(), raw(field), path, reinterpret_cast<std::uintptr_t>(&field), valid});
     };
     auto stringField = [&result](const std::string& label, const char* value, std::size_t size, const std::string& path) {
-        std::string text = stringValue(value, size), bytes;
+        std::string text = stringValue(value, size);
         const auto* source = reinterpret_cast<const volatile unsigned char*>(value);
         std::ostringstream s; s << std::hex << std::uppercase << std::setfill('0');
         for (std::size_t i=0; i<size; ++i) { if (i) s << ' '; s << std::setw(2) << unsigned(source[i]); }
         result.push_back({label, "char[" + std::to_string(size) + "]", text, text, s.str(), path, reinterpret_cast<std::uintptr_t>(value), true});
     };
     add("Module root", "World*", breakout_world_root, "module!breakout_world_root");
-    result.back().valid = read(breakout_world_root) == &world_;
-    add("World.player", "Actor*", world_.player, "breakout_world_root -> World.player (+0)");
-    result.back().valid = ownsActor(read(world_.player));
-    add("World.enemies[0]", "Actor*", world_.enemies[0], "breakout_world_root -> World.enemies[0] (+8)");
-    result.back().valid = ownsActor(read(world_.enemies[0]));
-    add("Lesson number (UI metadata)", "int32", world_.room, "breakout_world_root -> World.room (+24)");
+    result.back().valid = read(breakout_world_root) == world_;
+    add("World.player", "Actor*", world_->player, "breakout_world_root -> World.player (+0)");
+    result.back().valid = ownsActor(read(world_->player));
+    add("World.enemies[0]", "Actor*", world_->enemies[0], "breakout_world_root -> World.enemies[0] (+8)");
+    result.back().valid = ownsActor(read(world_->enemies[0]));
+    add("World.room", "int32", world_->room, "breakout_world_root -> World.room (+24)");
     if (room_ == 3) {
-        add("Remaining time", "float32", world_.remainingTime, "breakout_world_root -> World.remainingTime (+28)");
-        add("Corridor distance", "float32", world_.corridorDistance, "breakout_world_root -> World.corridorDistance (+32)");
+        add("Remaining time", "float32", world_->remainingTime, "breakout_world_root -> World.remainingTime (+28)");
+        add("Corridor distance", "float32", world_->corridorDistance, "breakout_world_root -> World.corridorDistance (+32)");
     }
-    add("Door decision", "uint8", world_.doorOpen, "breakout_world_root -> World.doorOpen (+36)");
+    if (room_ == 6) add("Relay power", "float32", world_->corridorDistance, "breakout_world_root -> World (+32)");
+    add("Door decision", "uint8", world_->doorOpen, "breakout_world_root -> World.doorOpen (+36)");
     auto actorFields = [&](Actor* actor, const std::string& prefix, const std::string& path) {
         if (!ownsActor(actor)) return;
         add(prefix + "health", "int32", actor->health, path + " -> Actor.health (+0)");
@@ -448,7 +584,7 @@ std::vector<FieldSnapshot> Game::fields() const {
         add(prefix + "charge", "float32", actor->charge, path + " -> Actor.charge (+12)");
         add(prefix + "X", "float32", actor->x, path + " -> Actor.x (+16)");
         add(prefix + "Y", "float32", actor->y, path + " -> Actor.y (+20)");
-        add(prefix + "flags", "uint32", actor->flags, path + " -> Actor.flags (+24), power=bit0 alarm=bit1");
+        add(prefix + "flags", "uint32", actor->flags, path + " -> Actor.flags (+24), power=bit0 alarm=bit1 maintenance=bit7");
         add(prefix + "faction", "uint32", actor->faction, path + " -> Actor.faction (+28), player=1 enemy=2");
         add(prefix + "clearance", "uint32", actor->clearance, path + " -> Actor.clearance (+32), engineer=2");
         add(prefix + "keycard", "uint8", actor->keycard, path + " -> Actor.keycard (+36)");
@@ -466,19 +602,15 @@ std::vector<FieldSnapshot> Game::fields() const {
         add(prefix + "cooldown", "float32", weapon->cooldown, path + " -> Inventory.equipped -> Weapon.cooldown (+32)");
     };
     actorFields(player(), "Player ", "breakout_world_root -> World.player");
-    if (room_ == 9 || room_ == 10) actorFields(read(world_.enemies[0]), "Enemy ", "breakout_world_root -> World.enemies[0]");
+    if (room_ == 10 || room_ == 11) actorFields(read(world_->enemies[0]), "Enemy ", "breakout_world_root -> World.enemies[0]");
     return result;
 }
 OutcomeSnapshot Game::outcome() const {
     OutcomeSnapshot result;
     result.complete = complete_; result.primaryObserved = primary_; result.restorationObserved = restored_;
-    result.manualRequired = room_ == 5 || room_ == 11 || room_ == 12;
-    result.manualAcknowledged = manual_;
-    if (complete_) result.detail = "Room complete. The observed outcome does not prove which editing technique was used.";
-    else if (primary_ && (room_ == 7 || room_ == 8 || room_ == 10 || room_ == 12) && !restored_)
-        result.detail = room_ == 10 && !enemyHookVerified_ ? "Player healing observed. Fire the enemy weapon, restore the code, then fire the player weapon again." : "Patched behavior observed. Use Restore original or Restore all in ReClass, then execute the next action to verify restoration.";
-    else if (primary_ && result.manualRequired && !manual_) result.detail = "Gameplay outcome observed. Complete and acknowledge the guided manual step.";
-    else result.detail = "Follow the lesson and execute the controlled action to observe the outcome.";
+    if (complete_) result.detail = "Room complete.";
+    else if (primary_ && (room_ == 7 || room_ == 8 || room_ == 11 || room_ == 13) && !restored_)
+        result.detail = room_ == 11 && !enemyHookVerified_ ? "Healing works. Wait for a sentinel shot, then restore the original code." : "It works. Now restore the original code and try once more.";
     return result;
 }
 TeachingSnapshot Game::teaching() const {
@@ -501,7 +633,7 @@ AcceptanceSnapshot Game::acceptance() const {
     result.room = room_; result.shots = shots_; result.hits = hits_; result.enemyShots = enemyShots_;
     result.targetsRemaining = int(std::count_if(targets_.begin(), targets_.end(), [](const auto& t) { return t.active; }));
     result.weaponSwaps = swaps_; result.destroyedBeforeSwap = beforeSwap_; result.destroyedAfterSwap = afterSwap_;
-    result.ticks = ticks_; result.paused = paused_; result.outcome = outcome();
+    result.links = links_; result.ticks = ticks_; result.paused = paused_; result.outcome = outcome();
     return result;
 }
 
@@ -509,138 +641,141 @@ bool selfCheck(std::string& report) {
     Game game;
     std::vector<std::string> failures;
     auto check = [&failures](bool condition, const std::string& message) { if (!condition) failures.push_back(message); };
+    auto ticks = [&game](int count, float mx = 0, float my = 0) { for (int i = 0; i < count; ++i) game.advanceTick(mx, my); };
+    const auto place = [&game](float x, float y) { Actor* a = game.world()->player; a->x = x; a->y = y; };
     const Actor* stablePlayer = game.world()->player;
     const auto teaching = game.teaching();
     check(teaching.ammoSite - teaching.signature == 16, "signature displacement");
     check(breakout_ammo_patchsite[0] == 0xff && breakout_ammo_patchsite[1] == 0x08, "DEC teaching instruction");
     check(breakout_damage_patchsite[0] == 0x83 && breakout_damage_patchsite[1] == 0x28 && breakout_damage_patchsite[2] == 0x0a, "SUB teaching instruction");
     for (int i = 2; i < 26; ++i) check(breakout_ammo_patchsite[i] == 0x90, "ammo patch padding");
-    for (int room = 1; room <= Game::roomCount; ++room) {
+    for (int room = 0; room < Game::roomCount; ++room) {
+        const std::string name = "room" + std::to_string(room) + " ";
         game.setRoom(room); Actor* a = game.world()->player;
-        check(a == stablePlayer && game.paused(), "room " + std::to_string(room) + " stable root and paused initialization");
-        check(a->ammo == 12 && a->health == (room == 10 ? 50 : 100), "room " + std::to_string(room) + " starting values");
-        const auto tick = game.acceptance().ticks; float oldX = a->x;
-        game.update(0.2, 1, 0); check(a->x == oldX && game.acceptance().ticks == tick, "paused update");
-        game.advanceTick(); check(game.acceptance().ticks == tick+1, "exactly one explicit tick");
+        check(a == stablePlayer && !game.paused(), name + "stable player and running start");
+        check(a->ammo == 12 && a->health == (room == 11 ? 50 : 100) && a->x == Game::SpawnX && a->y == Game::SpawnY, name + "starting values");
+        const auto start = game.acceptance().ticks;
+        game.setPaused(true); game.update(0.2, 1, 0); check(game.acceptance().ticks == start, name + "test freeze");
+        game.setPaused(false); game.update(10, 1, 0); check(game.acceptance().ticks == start, name + "debugger time discarded");
+        game.resetRoom(); a = game.world()->player;
+        for (int i = 0; i < 3; ++i) game.perform(Action::FireOnce);
+        check(a->ammo == 9 && !game.outcome().complete, name + "shooting works and completes nothing");
+        game.resetRoom(); a = game.world()->player;
         switch (room) {
+        case 0: ticks(600, 1, 0); check(!game.outcome().complete, name + "has no gameplay outcome"); break;
         case 1:
-            for (int i=0; i<30; ++i) game.perform(Action::FireOnce);
-            check(!game.outcome().complete, "room1 ordinary magazine cannot clear twenty targets");
-            game.perform(Action::Reload);
-            for (int i=0; i<20; ++i) game.perform(Action::FireOnce);
-            check(!game.outcome().complete, "room1 reloading invalidates completion");
-            game.resetRoom();
-            a->ammo = 30; for (int i=0; i<20; ++i) game.perform(Action::FireOnce);
-            check(game.outcome().complete && a->ammo == 10 && game.acceptance().shots == 20, "room1 all twenty targets, one shot/action"); break;
+            for (int i = 0; i < 30; ++i) game.perform(Action::FireOnce);
+            check(!game.outcome().complete, name + "twelve shots cannot clear twenty drones");
+            game.resetRoom(); for (int i = 0; i < 20; ++i) game.perform(Action::FireOnce);
+            check(!game.outcome().complete, name + "a restart gives only another twelve shots");
+            game.resetRoom(); a->ammo = 30; for (int i = 0; i < 20; ++i) game.perform(Action::FireOnce);
+            check(game.outcome().complete && a->ammo == 10, name + "edited ammo clears all drones");
+            { Zone zone; check(!game.interaction(zone) && game.zones().empty(), name + "no reload station exists"); }
+            break;
         case 2:
-            game.perform(Action::ChargeOnce); check(a->charge == 45, "charge once");
-            game.perform(Action::DrainOnce); check(a->charge == 40, "drain once");
-            for (int i=0; i<100; ++i) game.perform(Action::ChargeOnce);
-            game.perform(Action::ActivateReactor);
-            check(a->charge == 60 && !game.outcome().complete, "room2 repeated recharge cannot activate reactor");
-            game.perform(Action::DrainOnce); game.perform(Action::ChargeOnce);
-            check(a->charge == 60, "room2 drain/recharge cannot cross normal ceiling");
-            game.resetRoom(); game.setPaused(false);
-            for (int i=0; i<14000; ++i) game.advanceTick();
-            game.perform(Action::ActivateReactor);
-            check(a->charge == 60 && !game.outcome().complete, "room2 passive charging cannot activate reactor");
-            for (int i=0; i<100; ++i) { game.perform(Action::ChargeOnce); game.advanceTick(); }
-            game.perform(Action::ActivateReactor);
-            check(a->charge == 60 && !game.outcome().complete, "room2 combined controls cannot activate reactor");
-            a->charge = 95; game.perform(Action::ActivateReactor); check(game.outcome().complete, "room2 edited charge activates reactor");
-            game.perform(Action::ChargeOnce); check(a->charge == 100, "room2 externally edited charge retains +5 verification");
-            game.resetRoom(); game.perform(Action::ActivateReactor);
-            check(a->charge == 40 && !game.outcome().complete, "room2 reset removes edited completion"); break;
-        case 3:
-            game.perform(Action::StartTrial); for (int i=0; i<481; ++i) game.advanceTick(1, 0);
-            check(!game.outcome().complete, "default speed cannot win");
-            game.perform(Action::StartTrial); a->speed = 6000;
-            for (int i=0; i<6; ++i) game.advanceTick(1, 0);
-            check(game.outcome().complete, "edited speed wins trial"); break;
+            place(245, 105); ticks(60); check(a->charge > 40 && a->charge < 60, name + "charge pad raises charge");
+            ticks(1200); check(a->charge == 60, name + "charge pad stops at the cap");
+            place(245, 295); ticks(60); check(a->charge < 60, name + "drain vent lowers charge");
+            place(245, 105); ticks(1200); place(545, 180); game.perform(Action::ActivateReactor);
+            check(!game.outcome().complete, name + "ordinary charging cannot reach 90");
+            a->charge = 95; game.perform(Action::ActivateReactor); check(game.outcome().complete, name + "edited charge activates");
+            break;
+        case 3: {
+            place(200, 180); ticks(10, 1, 0); check(a->x > 200 && !game.renderSnapshot().trialRunning, name + "free walking before a run");
+            game.perform(Action::StartCountdown);
+            check(game.renderSnapshot().countdown > 2.9f && a->x == Game::SpawnX, name + "start puts ROOKIE on the line and counts down");
+            ticks(181, 1, 0); check(game.renderSnapshot().trialRunning && a->x == Game::SpawnX, name + "countdown holds still, then runs");
+            int guard = 0;
+            while (game.renderSnapshot().fall == 0 && guard++ < 600) game.advanceTick(1, 0);
+            check(!game.outcome().complete && !game.renderSnapshot().fail.empty() && guard > 400, name + "speed 60 is caught by the collapse near the end");
+            const float fellAt = a->x; ticks(200, 1, 0);
+            check(game.renderSnapshot().downed && a->x == fellAt, name + "after falling ROOKIE stays down until restarted");
+            game.perform(Action::StartCountdown); check(!game.renderSnapshot().downed && a->x == Game::SpawnX, name + "try again restores the run");
+            game.resetRoom(); game.perform(Action::StartTrial); a->speed = 6000; ticks(6, 1, 0);
+            check(game.outcome().complete, name + "edited speed wins");
+            game.resetRoom(); place(300, 30); ticks(1); check(a->y == 160, name + "bridge keeps ROOKIE on the deck");
+            break;
+        }
         case 4:
-            for (int i=0; i<8; ++i) {
-                game.perform(Action::ToggleKeycard); game.perform(Action::TogglePower);
-                game.perform(Action::ToggleAlarm); game.perform(Action::EvaluateDoor);
-                check(!game.outcome().complete && a->keycard == 0 && (a->flags & PowerFlag) == 0, "room4 controls cannot grant access");
-            }
-            a->keycard = 1; a->flags = PowerFlag | 0x80;
-            game.perform(Action::EvaluateDoor);
-            check(game.outcome().complete && a->flags == (PowerFlag | 0x80), "room4 edited byte/flags preserve unrelated bits");
-            game.perform(Action::ToggleKeycard); game.perform(Action::EvaluateDoor);
-            check(!game.outcome().complete && a->keycard == 0, "room4 invalidation revokes edited keycard");
-            a->keycard = 1; game.perform(Action::TogglePower); game.perform(Action::EvaluateDoor);
-            check(!game.outcome().complete && a->flags == 0x80, "room4 power cut revokes power and preserves unrelated bits"); break;
-        case 5:
-            game.perform(Action::AcknowledgeProject); game.perform(Action::EvaluateDoor);
-            check(!game.outcome().complete, "room5 acknowledgement cannot replace identity edit");
-            game.resetRoom();
-            std::strcpy(a->callsign, "ENGINEER"); a->clearance = EngineerClearance;
-            game.perform(Action::EvaluateDoor); check(!game.outcome().complete && game.outcome().primaryObserved, "room5 manual requirement");
-            game.perform(Action::AcknowledgeProject); check(game.outcome().complete, "room5 structure outcome");
-            game.resetRoom(); std::strcpy(a->callsign, "ENGINEERS"); a->clearance = EngineerClearance;
-            game.perform(Action::EvaluateDoor); check(!game.outcome().primaryObserved, "room5 scanner rejects a longer callsign");
-            game.resetRoom(); a->x = 500; a->y = 180; game.advanceTick();
-            check(game.renderSnapshot().scanning && !game.outcome().primaryObserved, "room5 standing on the pad scans without granting access"); break;
-        case 6: {
-            for (int i=0; i<6; ++i) game.perform(Action::FireOnce);
-            game.perform(Action::SwapWeapon);
-            for (int i=0; i<6; ++i) game.perform(Action::FireOnce);
-            check(!game.outcome().complete && game.acceptance().targetsRemaining == 2, "room6 ordinary weapons cannot penetrate armor");
+            check(a->flags == (AlarmFlag | 0x80), name + "maintenance and alarm bits start set");
+            game.perform(Action::ToggleAlarm); game.perform(Action::EvaluateDoor);
+            check(!game.outcome().complete && a->flags == 0x80, name + "switch clears only the alarm bit");
+            a->keycard = 1; a->flags = PowerFlag; game.perform(Action::EvaluateDoor);
+            check(!game.outcome().complete, name + "wiping the maintenance bit is rejected");
+            a->flags = PowerFlag | 0x80; game.perform(Action::EvaluateDoor);
+            check(game.outcome().complete, name + "preserving edit opens the door");
+            game.resetRoom(); ticks(120, 1, 0); place(600, 180); ticks(60, 1, 0); check(a->x <= 610, name + "closed door blocks movement");
+            break;
+        case 5: {
+            for (int i = 0; i < 6; ++i) game.perform(Action::FireOnce);
+            game.perform(Action::SwapWeapon); for (int i = 0; i < 6; ++i) game.perform(Action::FireOnce);
+            check(!game.outcome().complete && game.acceptance().targetsRemaining == 2, name + "damage 5 cannot break armor");
             game.resetRoom();
             auto* old = a->inventory->equipped; old->damage = 30; game.perform(Action::FireOnce);
             game.perform(Action::SwapWeapon); auto* replacement = a->inventory->equipped;
-            check(old != replacement && replacement->damage == 7, "replacement changes address and starts unmodified");
-            replacement->damage = 30; game.perform(Action::FireOnce); check(game.outcome().complete, "room6 upgrade each equipped weapon"); break;
+            check(old != replacement && replacement->damage == 7, name + "swap allocates a fresh weapon");
+            replacement->damage = 30; game.perform(Action::FireOnce); check(game.outcome().complete, name + "both upgrades complete");
+            break;
+        }
+        case 6: {
+            World* first = game.world();
+            check(breakout_world_root == first && first->room == 6, name + "root points at a room-6 block");
+            ticks(10); check(game.acceptance().links == 0 && !first->doorOpen, name + "relay starts unpowered");
+            first->corridorDistance = 100; ticks(1); check(game.acceptance().links == 1 && first->doorOpen, name + "power opens the relay");
+            game.perform(Action::RebootRelay); World* second = game.world();
+            check(second != first && breakout_world_root == second && second->room == 6 && second->player == stablePlayer, name + "reboot moves the block");
+            ticks(1); check(!second->doorOpen && game.acceptance().links == 1, name + "new block starts closed");
+            first->corridorDistance = 100; ticks(1); check(game.acceptance().links == 1, name + "stale block edits do nothing");
+            second->corridorDistance = 100; ticks(1); game.perform(Action::RebootRelay);
+            game.world()->corridorDistance = 100; ticks(1);
+            check(game.outcome().complete, name + "three links complete");
+            break;
         }
         case 7:
-            for (int i=0; i<20; ++i) game.perform(Action::TakeOneHit);
-            game.perform(Action::ToggleTurret);
-            for (int i=0; i<400; ++i) game.advanceTick();
-            check(!game.outcome().complete, "room7 repeated hits and turret cannot simulate invulnerability");
-            game.resetRoom();
-            game.perform(Action::TakeOneHit); check(a->health == 90 && game.acceptance().hits == 1 && !game.outcome().complete, "room7 ordinary damage and restoration requirement"); break;
+            for (int i = 0; i < 20; ++i) game.perform(Action::TakeOneHit);
+            check(!game.outcome().complete && a->health > 0, name + "hits cannot fake invulnerability and respawn");
+            game.resetRoom(); place(500, 200); ticks(70); check(a->health == 90, name + "turret zone hits after a moment");
+            place(200, 200); ticks(120); check(a->health == 90, name + "safe outside the zone");
+            break;
         case 8:
-            for (int i=0; i<20; ++i) game.perform(Action::FireOnce);
-            check(!game.outcome().complete, "room8 ordinary shots cannot simulate ammo increments");
-            game.resetRoom();
-            game.perform(Action::FireOnce); check(a->ammo == 11 && !game.outcome().complete, "room8 ordinary ammo and restoration requirement"); break;
+            for (int i = 0; i < 20; ++i) game.perform(Action::FireOnce);
+            check(!game.outcome().complete, name + "ordinary shots never increase ammo"); break;
         case 9:
-            game.perform(Action::TakeOneHit); game.perform(Action::HitEnemy);
-            check(!game.outcome().complete && !game.outcome().manualRequired, "room9 hits alone do not unlock the press");
-            a->clearance = game.decoyCode_; game.perform(Action::EvaluateDoor);
-            check(!game.outcome().complete, "room9 the enemy's decoy code is rejected");
-            check(game.overrideCode_ >= 1000 && game.overrideCode_ <= 9999 && game.overrideCode_ != game.decoyCode_, "room9 distinct four-digit codes");
-            a->clearance = game.overrideCode_; game.perform(Action::EvaluateDoor);
-            check(a->health == 90 && game.world()->enemies[0]->health == 90 && game.outcome().complete, "room9 player's override code completes"); break;
+            place(500, 180); ticks(5); check(game.renderSnapshot().scanning && !game.outcome().complete, name + "pad scans ROOKIE and rejects it");
+            std::strcpy(a->callsign, "ENGINEERS"); a->clearance = EngineerClearance; ticks(5);
+            check(!game.outcome().complete, name + "longer callsign rejected");
+            std::memset(a->callsign, 0, sizeof(a->callsign)); std::strcpy(a->callsign, "ENGINEER"); ticks(5);
+            check(game.outcome().complete && game.world()->doorOpen, name + "secret callsign opens the gate");
+            break;
         case 10:
-            for (int i=0; i<20; ++i) { game.perform(Action::FireOnce); game.perform(Action::EnemyFire); }
-            check(!game.outcome().complete, "room10 ordinary firing cannot heal player");
-            game.resetRoom();
-            game.perform(Action::FireOnce); game.perform(Action::EnemyFire);
-            check(a->ammo == 11 && a->health == 50 && game.world()->enemies[0]->ammo == 11 && !game.outcome().complete, "room10 ordinary ammo does not heal"); break;
+            place(400, 330); ticks(100);
+            check(game.acceptance().hits == 1 && game.world()->enemies[0]->health == 90, name + "press hits sentinel then player");
+            a->clearance = game.decoyCode_; game.perform(Action::EvaluateDoor);
+            check(!game.outcome().complete, name + "decoy code rejected");
+            check(game.overrideCode_ >= 1000 && game.overrideCode_ <= 9999 && game.overrideCode_ != game.decoyCode_, name + "distinct four-digit codes");
+            a->clearance = game.overrideCode_; game.perform(Action::EvaluateDoor);
+            check(game.outcome().complete, name + "player's code completes");
+            break;
         case 11:
-            game.perform(Action::AcknowledgeTrace);
-            for (int i=0; i<8; ++i) {
-                game.perform(Action::ToggleKeycard); game.perform(Action::ToggleAlarm); game.perform(Action::EvaluateDoor);
-                check(!game.outcome().complete, "room11 controls/acknowledgement cannot open vault");
-            }
-            a->keycard = 1; a->clearance = EngineerClearance; a->flags = PowerFlag;
-            game.perform(Action::EvaluateDoor); game.perform(Action::AcknowledgeTrace); check(game.outcome().complete, "room11 NASM vault and trace acknowledgment"); break;
+            ticks(160); check(game.acceptance().enemyShots == 1, name + "sentinel fires on its own");
+            for (int i = 0; i < 20; ++i) game.perform(Action::FireOnce);
+            check(!game.outcome().complete && a->health == 50, name + "ordinary firing never heals"); break;
         case 12:
-            game.perform(Action::AcknowledgeRestart);
-            for (int i=0; i<20; ++i) game.perform(Action::FireOnce);
-            check(!game.outcome().complete, "room12 restart acknowledgement cannot replace patch");
-            game.resetRoom(); game.perform(Action::AcknowledgeRestart); game.perform(Action::FireOnce);
-            check(!game.outcome().complete && a->ammo == 11, "room12 requires actual increasing then restored behavior"); break;
+            for (int i = 0; i < 8; ++i) { game.perform(Action::EvaluateDoor); check(!game.outcome().complete, name + "vault refuses defaults"); }
+            a->keycard = 1; a->clearance = EngineerClearance; a->flags = 0;
+            game.perform(Action::EvaluateDoor); check(game.outcome().complete, name + "fixed inputs open the vault"); break;
+        case 13:
+            for (int i = 0; i < 20; ++i) game.perform(Action::FireOnce);
+            check(!game.outcome().complete, name + "ordinary shots never increase ammo"); break;
         }
     }
-    game.setRoom(3); Actor* a = game.world()->player; game.setPaused(false);
-    auto ticks = game.acceptance().ticks; game.update(10, 1, 0); check(game.acceptance().ticks == ticks, "debugger elapsed time discarded");
-    game.update(0.24, 1, 0); check(game.acceptance().ticks <= ticks+6, "bounded catch-up");
-    game.focusLost(); check(game.paused(), "focus loss pauses simulation");
-    a->speed = std::numeric_limits<float>::quiet_NaN(); ticks = game.acceptance().ticks;
-    game.advanceTick(1, 0); check(game.acceptance().ticks == ticks, "non-finite movement suspended");
-    game.setRoom(6); a = game.world()->player;
+    game.setRoom(6); game.perform(Action::RebootRelay); game.setRoom(1);
+    check(game.world()->room == 1 && game.world()->player == stablePlayer, "relocated world survives room changes");
+    game.setRoom(3); Actor* a = game.world()->player;
+    auto count = game.acceptance().ticks; game.update(0.24, 1, 0); check(game.acceptance().ticks <= count + 6, "bounded catch-up");
+    a->speed = std::numeric_limits<float>::quiet_NaN(); count = game.acceptance().ticks;
+    game.advanceTick(1, 0); check(game.acceptance().ticks == count, "non-finite movement suspended");
+    game.setRoom(5); a = game.world()->player;
     a->inventory = reinterpret_cast<Inventory*>(std::uintptr_t(1));
     check(!game.perform(Action::FireOnce) && a->ammo == 12, "invalid inventory pointer safely suspends fire");
     check(!game.fields().empty(), "invalid pointer snapshot safely displays raw values");
@@ -653,7 +788,7 @@ bool selfCheck(std::string& report) {
     game.resetRoom();
     check(!game.teaching().ammoPatched && !game.teaching().damagePatched, "self-check never patches teaching code");
     std::ostringstream output;
-    if (failures.empty()) output << "ReClass Breakout self-check passed: all 12 initializers, controlled actions, data outcomes, pointer safety, fixed ticks and teaching layout. Code-patch/restoration workflows require the guided ReClass acceptance pass.";
+    if (failures.empty()) output << "ReClass Breakout self-check passed: all 14 rooms, ordinary-play barriers, edited outcomes, zones, countdown, relay relocation, pointer safety and teaching layout. Code-patch/restoration workflows require the guided ReClass acceptance pass.";
     else { output << "ReClass Breakout self-check failed:"; for (const auto& failure : failures) output << "\n- " << failure; }
     report = output.str(); return failures.empty();
 }

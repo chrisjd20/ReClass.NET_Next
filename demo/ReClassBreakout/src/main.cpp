@@ -9,20 +9,21 @@
 #endif
 
 int main(int argc, char** argv) {
-    int room = 0;
-    bool check = false;
+    int room = -1; // -1: resume the saved room
+    bool check = false, unlockAll = false;
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--self-check") == 0) check = true;
+        else if (std::strcmp(argv[i], "--unlock-all") == 0) unlockAll = true; // developer/acceptance only
         else if (std::strcmp(argv[i], "--room") == 0 && i + 1 < argc) {
             char* end = nullptr;
             const long parsed = std::strtol(argv[++i], &end, 10);
-            if (!end || *end || parsed < 1 || parsed > 12) {
-                std::cerr << "--room requires a room number from 1 to 12.\n"; return 2;
+            if (!end || *end || parsed < 0 || parsed > 13) {
+                std::cerr << "--room requires a room number from 0 to 13.\n"; return 2;
             }
             room = static_cast<int>(parsed);
         } else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
-            std::cout << "ReClass: Breakout\nUsage: ReClassBreakout [--room 1..12] [--self-check]\n"
-                         "F1..F12 select rooms; Ctrl+P pauses; Ctrl+R resets gameplay data.\n";
+            std::cout << "ReClass: Breakout\nUsage: ReClassBreakout [--room 0..13] [--self-check]\n"
+                         "Escape opens the room select; Ctrl+R restarts a room; Tab shows the steps.\n";
             return 0;
         } else { std::cerr << "Unknown or incomplete option: " << argv[i] << '\n'; return 2; }
     }
@@ -43,5 +44,5 @@ int main(int argc, char** argv) {
 #else
     diagnostic = "Attach the matching x64 ReClass build to this process.";
 #endif
-    return breakout::runFrontend(room, diagnostic);
+    return breakout::runFrontend(room, diagnostic, unlockAll);
 }
