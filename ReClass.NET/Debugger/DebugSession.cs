@@ -304,7 +304,10 @@ namespace ReClassNET.Debugger
             finally{if(resume&&!recoveryRequired)ResumeInternal();}
             return watch;
         });
-        public Task<DebugWatch> StartInstructionWatchAsync(ulong address,Action<WatchHit> sink,string condition="",bool pause=false,bool hardware=false)=>InvokeAsync(()=>{
+        // Prefers a hardware execution breakpoint: on an address that is not really an instruction start it
+        // simply never fires, whereas INT3 would corrupt the instruction around it. Software INT3 is only a
+        // fallback when every debug register is busy, and only if the caller knows the address is an instruction start.
+        public Task<DebugWatch> StartInstructionWatchAsync(ulong address,Action<WatchHit> sink,string condition="",bool pause=false,bool allowSoftware=true)=>InvokeAsync(()=>{
             if(stopDepth>0)throw new InvalidOperationException("A code transaction owns the process stop; retry after it finishes.");
             if((Capabilities&(AdvancedCapabilities.Context|AdvancedCapabilities.Stepping))!=(AdvancedCapabilities.Context|AdvancedCapabilities.Stepping))throw new NotSupportedException("Instruction discovery requires thread context and instruction stepping from the selected provider.");
             var overlap=FindPatchOverlap?.Invoke(address,1);if(overlap!=null)throw new InvalidOperationException(overlap);
@@ -314,18 +317,20 @@ namespace ReClassNET.Debugger
             try
             {
                 var first=ReadInstruction(address);var original=first.Bytes;
-                if(hardware)
+                int slot=Array.FindIndex(slots,x=>x==null);
+                if(slot>=0)
                 {
-                    int slot=Array.FindIndex(slots,x=>x==null);if(slot<0)throw new InvalidOperationException("No hardware execution slot available.");
                     Native(AdvancedOperation.Hardware,address:address,value:(ulong)slot,flags:1U|(1U<<16));slots[slot]=watch;watch.Slots.Add(slot);
                 }
                 else
                 {
+                    if(!allowSoftware)throw new InvalidOperationException("All 4 hardware debug registers are busy. Press Stop in another Find writes/accesses window, then try again.");
                     if(original[0]==0xcc)throw new InvalidOperationException("Instruction already contains INT3.");
                     watch.Software=true;watch.Original=original[0];WriteCode(address,new byte[]{0xcc},true);
                 }
                 watches.Add(watch.Id,watch);
-                if(knownEntries.Count<10000)knownEntries.Add(address);
+                // A hardware watch proves the boundary only once it fires (see HandleExecution).
+                if(watch.Software&&knownEntries.Count<10000)knownEntries.Add(address);
             }
             finally{if(resume&&!recoveryRequired)ResumeInternal();}
             return watch;
@@ -429,6 +434,7 @@ namespace ReClassNET.Debugger
                 before.Rip=watch.Address;SetContext(before);
             }
             var decoded=new[]{ReadInstruction(watch.Address)};RecordInstructions(decoded);
+            if(knownEntries.Count<10000)knownEntries.Add(watch.Address);
             watch.Count++;var snapshot=Snapshot(before,(before.Available&1)!=0&&before.Rip==watch.Address?SnapshotPhase.Before:SnapshotPhase.Unknown);
             bool match;
             try{match=watch.Condition.Evaluate(snapshot.Registers,evt.Thread,watch.Count,ReadExact);}

@@ -72,7 +72,7 @@ namespace ReClassNET.AssemblyEditing
 	{
 		public const int MaxBytes = 65536;
 
-		private static NasmFormatter CreateFormatter()
+		internal static NasmFormatter CreateFormatter()
 		{
 			var formatter = new NasmFormatter();
 			formatter.Options.FirstOperandCharIndex = 0;

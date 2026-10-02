@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace breakout {
@@ -18,9 +19,10 @@ enum class Action {
     StartTrial, StartCountdown, RebootRelay
 };
 struct ActionDefinition { Action action; std::string label; bool available; };
+// Addresses are kept as text: a binary copy left in freed heap memory would
+// show up in the player's pointer scans as a false result.
 struct FieldSnapshot {
-    std::string label, type, value, roundTrip, rawHex, path;
-    std::uintptr_t address = 0;
+    std::string label, type, value, roundTrip, rawHex, path, address;
     bool valid = true;
 };
 // A rectangular area of the room: a pad you stand on, or a console you use with E.
@@ -111,6 +113,10 @@ public:
     std::vector<FieldSnapshot> fields() const;
     OutcomeSnapshot outcome() const;
     TeachingSnapshot teaching() const;
+    // Current addresses ("0x…") and values named for {{live.NAME}} lesson
+    // tokens. Reads pointers and code labels only, never fields a lesson
+    // watches, and returns text only.
+    std::vector<std::pair<std::string, std::string>> liveText() const;
     AcceptanceSnapshot acceptance() const;
     const std::string& status() const { return status_; }
     World* world() { return world_; }

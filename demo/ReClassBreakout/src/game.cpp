@@ -544,6 +544,7 @@ RenderSnapshot Game::renderSnapshot() const {
 }
 std::vector<FieldSnapshot> Game::fields() const {
     std::vector<FieldSnapshot> result;
+    result.reserve(64); // Never reallocates, so no stale copies are freed.
     auto add = [&result](const std::string& label, const std::string& type, const auto& field, const std::string& path) {
         using T = std::decay_t<decltype(field)>;
         T value = read(field); std::ostringstream display, exact;
@@ -554,14 +555,14 @@ std::vector<FieldSnapshot> Game::fields() const {
             exact << std::setprecision(std::numeric_limits<T>::max_digits10) << value;
             valid = std::isfinite(value);
         } else { display << +value; exact << +value; }
-        result.push_back({label, type, display.str(), exact.str(), raw(field), path, reinterpret_cast<std::uintptr_t>(&field), valid});
+        result.push_back({label, type, display.str(), exact.str(), raw(field), path, hex(reinterpret_cast<std::uintptr_t>(&field)), valid});
     };
     auto stringField = [&result](const std::string& label, const char* value, std::size_t size, const std::string& path) {
         std::string text = stringValue(value, size);
         const auto* source = reinterpret_cast<const volatile unsigned char*>(value);
         std::ostringstream s; s << std::hex << std::uppercase << std::setfill('0');
         for (std::size_t i=0; i<size; ++i) { if (i) s << ' '; s << std::setw(2) << unsigned(source[i]); }
-        result.push_back({label, "char[" + std::to_string(size) + "]", text, text, s.str(), path, reinterpret_cast<std::uintptr_t>(value), true});
+        result.push_back({label, "char[" + std::to_string(size) + "]", text, text, s.str(), path, hex(reinterpret_cast<std::uintptr_t>(value)), true});
     };
     add("Module root", "World*", breakout_world_root, "module!breakout_world_root");
     result.back().valid = read(breakout_world_root) == world_;
@@ -611,6 +612,32 @@ OutcomeSnapshot Game::outcome() const {
     if (complete_) result.detail = "Room complete.";
     else if (primary_ && (room_ == 7 || room_ == 8 || room_ == 11 || room_ == 13) && !restored_)
         result.detail = room_ == 11 && !enemyHookVerified_ ? "Healing works. Wait for a sentinel shot, then restore the original code." : "It works. Now restore the original code and try once more.";
+    return result;
+}
+std::vector<std::pair<std::string, std::string>> Game::liveText() const {
+    std::vector<std::pair<std::string, std::string>> result;
+    result.reserve(16);
+    const auto address = [&result](const char* name, const void* pointer) {
+        result.emplace_back(name, pointer ? hex(reinterpret_cast<std::uintptr_t>(pointer)) : std::string());
+    };
+    const auto at = [](const unsigned char* label, std::ptrdiff_t offset) { return label + offset; };
+    const World* current = read(breakout_world_root);
+    Actor* actor = player();
+    Actor* enemy = read(world_->enemies[0]);
+    address("rookie", actor);
+    address("inventory", inventory(actor));
+    address("weapon", equipped(actor));
+    address("world", current == world_ ? current : nullptr);
+    address("enemy", ownsActor(enemy) ? enemy : nullptr);
+    address("root", &breakout_world_root);
+    address("damage.site", breakout_damage_patchsite);
+    address("damage.decoy", at(breakout_damage_patchsite, 1));      // tail of the sub: "sub [rdx],cl"
+    address("ammo.site", breakout_ammo_patchsite);
+    address("badge.read", at(breakout_badge_compare, -4));          // mov rdx,[rax+0x28]
+    address("badge.decoy", at(breakout_badge_compare, -3));         // its tail: mov edx,[rax+0x28]
+    address("vault.entry", breakout_vault_entry);
+    address("vault.deny", at(breakout_vault_endpoint, -2));         // xor eax,eax
+    result.emplace_back("override", std::to_string(overrideCode_));
     return result;
 }
 TeachingSnapshot Game::teaching() const {
@@ -779,6 +806,11 @@ bool selfCheck(std::string& report) {
     a->inventory = reinterpret_cast<Inventory*>(std::uintptr_t(1));
     check(!game.perform(Action::FireOnce) && a->ammo == 12, "invalid inventory pointer safely suspends fire");
     check(!game.fields().empty(), "invalid pointer snapshot safely displays raw values");
+    {
+        const auto live = game.liveText();
+        const auto rookie = std::find_if(live.begin(), live.end(), [](const auto& entry) { return entry.first == "rookie"; });
+        check(rookie != live.end() && rookie->second == hex(reinterpret_cast<std::uintptr_t>(a)), "live text names ROOKIE's address");
+    }
     game.resetRoom(); a = game.world()->player; a->inventory->equipped = reinterpret_cast<Weapon*>(std::uintptr_t(1));
     check(!game.perform(Action::FireOnce) && a->ammo == 12, "invalid equipped pointer safely suspends fire");
     game.resetRoom(); game.world()->player = reinterpret_cast<Actor*>(std::uintptr_t(1));

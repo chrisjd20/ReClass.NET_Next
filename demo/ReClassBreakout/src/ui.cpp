@@ -39,7 +39,7 @@ void scissor(Rectangle rect) {
 // Keep text consistent with the retained bitmap headings and ASCII font atlas.
 // Normalize display only; clipboard instructions retain the original lesson text.
 std::string displayText(std::string value) {
-    static const std::vector<std::pair<std::string, std::string>> replacements{{"→", "->"}, {"’", "'"}, {"×", "x"}, {"…", "..."}, {"–", "-"}, {"—", "-"}, {"“", "\""}, {"”", "\""}};
+    static const std::vector<std::pair<std::string, std::string>> replacements{{"→", "->"}, {"←", "<-"}, {"’", "'"}, {"×", "x"}, {"…", "..."}, {"–", "-"}, {"—", "-"}, {"“", "\""}, {"”", "\""}};
     for (const auto& replacement : replacements) {
         std::size_t at = 0;
         while ((at = value.find(replacement.first, at)) != std::string::npos) {

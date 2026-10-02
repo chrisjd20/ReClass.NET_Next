@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
 using System.Linq;
@@ -7,9 +8,12 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using ReClassNET.AssemblyEditing;
+using ReClassNET.Controls.Debugger;
 using ReClassNET.Debugger;
 using ReClassNET.Patching;
+using ReClassNET.Properties;
 using ReClassNET.UI;
+using ReClassNET.UI.Debugger;
 
 namespace ReClassNET.Forms
 {
@@ -19,31 +23,49 @@ namespace ReClassNET.Forms
 		private readonly PatchRepository repository;
 		private readonly RegisterSnapshot snapshot;
 		private PatchDefinition definition;
-		private readonly TextBox addressBox = new TextBox { Width = 160 };
-		private readonly TextBox nameBox = new TextBox { Width = 180 };
-		private readonly NumericUpDown lengthBox = new NumericUpDown { Minimum = 1, Maximum = 65536, Width = 80 };
-		private readonly ComboBox modeBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 95 };
-		private readonly ComboBox semanticBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 155 };
-		private readonly ComboBox locatorBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 145 };
-		private readonly TextBox patternBox = new TextBox { Width = 310 };
-		private readonly TextBox entryOffsetBox = new TextBox { Width = 75, Text = "0" };
+		private readonly TextBox addressBox = new TextBox { Width = DpiUtil.ScaleIntX(170) };
+		private readonly TextBox nameBox = new TextBox { Width = DpiUtil.ScaleIntX(180) };
+		private readonly NumericUpDown lengthBox = new NumericUpDown { Minimum = 1, Maximum = 65536, Width = DpiUtil.ScaleIntX(80) };
+		private readonly SegmentedSelector<PatchMode> modeBox = new SegmentedSelector<PatchMode>()
+			.Add(PatchMode.InPlace, "In place", "Overwrite the selected bytes. The new code must fit in the same space.")
+			.Add(PatchMode.Hook, "Hook", "Jump out to your code in new memory, then back. Any length.");
+		private readonly SegmentedSelector<HookSemanticMode> semanticBox = new SegmentedSelector<HookSemanticMode>()
+			.Add(HookSemanticMode.ReplaceSelection, "Replace selection", "Your code runs instead of the original instructions.")
+			.Add(HookSemanticMode.InsertBefore, "Insert before", "Your code runs first, then the original instructions.")
+			.Add(HookSemanticMode.InsertAfter, "Insert after", "The original instructions run first, then your code.");
+		private readonly SegmentedSelector<PatchLocatorKind> locatorBox = new SegmentedSelector<PatchLocatorKind>()
+			.Add(PatchLocatorKind.SessionAddress, "Session address", "Saved by absolute address: only valid in this game process.")
+			.Add(PatchLocatorKind.ModuleOffset, "Module + offset", "Saved as module + offset: finds the code again after a restart.")
+			.Add(PatchLocatorKind.ModulePattern, "Module pattern", "Saved as a unique byte pattern: survives small game updates.");
+		private readonly TextBox patternBox = new TextBox { Width = DpiUtil.ScaleIntX(300) };
+		private readonly TextBox entryOffsetBox = new TextBox { Width = DpiUtil.ScaleIntX(70), Text = "0" };
 		private readonly Label moduleLabel = new Label { AutoSize = true };
 		private readonly TextBox originalBox = MakeCodeBox(true);
 		private readonly TextBox assemblyBox = MakeCodeBox(false);
 		private readonly TextBox hexBox = MakeCodeBox(false);
 		private readonly TextBox previewBox = MakeCodeBox(true);
-		private readonly Label status = new Label { Dock = DockStyle.Fill, AutoSize = false, Padding = new Padding(4), ForeColor = Color.DarkSlateGray };
-		private readonly Button loadButton = new Button { Text = "Load selection", AutoSize = true };
-		private readonly Button previewButton = new Button { Text = "Preview", AutoSize = true };
-		private readonly Button applyButton = new Button { Text = "Apply", AutoSize = true };
-		private readonly Button prepareButton = new Button { Text = "Prepare hook", AutoSize = true };
-		private readonly Button nopButton = new Button { Text = "NOP selection", AutoSize = true };
-		private readonly Button restoreButton = new Button { Text = "Restore original", AutoSize = true };
-		private readonly Button saveButton = new Button { Text = "Save definition", AutoSize = true };
-		private readonly Button cancelButton = new Button { Text = "Cancel preparation", AutoSize = true };
-		private readonly Button followRegisterButton = new Button { Text = "Follow captured register", AutoSize = true };
-		private readonly Button followOperandButton = new Button { Text = "Follow captured operand", AutoSize = true };
-		private readonly Button reverseButton = new Button { Text = "Find accessed addresses", AutoSize = true };
+		private readonly StatusLine status = new StatusLine();
+		private readonly DebuggerHeader header = new DebuggerHeader();
+		private readonly StepRail rail = new StepRail();
+		private readonly InstructionListView originalList = new InstructionListView { Dock = DockStyle.Fill };
+		private readonly RegisterBoard capturedBoard = new RegisterBoard { Dock = DockStyle.Fill };
+		private readonly ByteDiffView diffView = new ByteDiffView { Dock = DockStyle.Fill };
+		private readonly NoteLine assemblyNote = new NoteLine(), hexNote = new NoteLine();
+		private readonly SizeMeter sizeMeter = new SizeMeter { Dock = DockStyle.Fill };
+		private readonly Label modeHelp = Help(), semanticHelp = Help(), locatorHelp = Help();
+		private readonly ToolTip tips = new ToolTip();
+		private readonly DarkButton loadButton = new DarkButton("Load selection", Resources.B16x16_Arrow_Refresh);
+		private readonly DarkButton previewButton = new DarkButton("Preview", Resources.B16x16_Magnifier);
+		private readonly DarkButton applyButton = new DarkButton("Apply", Resources.B16x16_Accept, DarkButtonStyle.Primary);
+		private readonly DarkButton prepareButton = new DarkButton("Prepare hook", Resources.B16x16_Cogs);
+		private readonly DarkButton nopButton = new DarkButton("NOP selection", Resources.B16x16_Button_Remove);
+		private readonly DarkButton restoreButton = new DarkButton("Restore original", Resources.B16x16_Undo, DarkButtonStyle.Danger);
+		private readonly DarkButton saveButton = new DarkButton("Save definition", Resources.B16x16_Save);
+		private readonly DarkButton cancelButton = new DarkButton("Cancel preparation", Resources.B16x16_Button_Delete, DarkButtonStyle.Ghost);
+		private readonly DarkButton followRegisterButton = new DarkButton("Follow captured register", Resources.B16x16_Pointer_Type, DarkButtonStyle.Ghost);
+		private readonly DarkButton followOperandButton = new DarkButton("Follow captured operand", Resources.B16x16_Right_Button, DarkButtonStyle.Ghost);
+		private readonly DarkButton reverseButton = new DarkButton("Find accessed addresses", Resources.B16x16_Magnifier_Arrow, DarkButtonStyle.Ghost);
+		private readonly Panel patternFields = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, Margin = Padding.Empty };
 		private readonly System.Windows.Forms.Timer debounce = new System.Windows.Forms.Timer { Interval = 300 };
 		private CancellationTokenSource conversion;
 		private CancellationTokenSource operation;
@@ -54,7 +76,7 @@ namespace ReClassNET.Forms
 		private ulong loadedAddress;
 		private int loadedLength;
 		private long editVersion;
-		private bool syncing, busy, closingAfterCleanup, closeRequested;
+		private bool syncing, busy, closingAfterCleanup, closeRequested, restored;
 
 		public AssemblyEditorForm(DebugWorkspace workspace, ulong address, BoundarySource boundary = BoundarySource.ExplicitOrigin, RegisterSnapshot snapshot = null, PatchDefinition definition = null)
 		{
@@ -64,30 +86,80 @@ namespace ReClassNET.Forms
 			this.definition = definition?.Clone() ?? new PatchDefinition { Boundary = boundary, SessionId = workspace.Target.SessionId, SessionAddress = address, Platform = workspace.Target.Platform };
 			authoritative = this.definition.SourceKind;
 			Text = "Instruction inspector and assembly editor";
-			MinimumSize = new Size(950, 700); Size = new Size(1150, 880); StartPosition = FormStartPosition.CenterParent;
-			modeBox.Items.AddRange(new object[] { Choice.Of(PatchMode.InPlace, "In place"), Choice.Of(PatchMode.Hook, "Hook") });
-			semanticBox.Items.AddRange(new object[] { Choice.Of(HookSemanticMode.ReplaceSelection, "Replace selection"), Choice.Of(HookSemanticMode.InsertBefore, "Insert before"), Choice.Of(HookSemanticMode.InsertAfter, "Insert after") });
-			locatorBox.Items.AddRange(new object[] { Choice.Of(PatchLocatorKind.SessionAddress, "Session address"), Choice.Of(PatchLocatorKind.ModuleOffset, "Module + offset"), Choice.Of(PatchLocatorKind.ModulePattern, "Module pattern") });
-			var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 8, Padding = new Padding(8) };
-			layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 37)); layout.RowStyles.Add(new RowStyle(SizeType.Percent, 25));
-			layout.RowStyles.Add(new RowStyle(SizeType.Percent, 38)); layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 37));
-			layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 60)); layout.RowStyles.Add(new RowStyle(SizeType.Percent, 37));
-			layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 72)); layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
+			MinimumSize = new Size(DpiUtil.ScaleIntX(1000), DpiUtil.ScaleIntY(760)); Size = new Size(DpiUtil.ScaleIntX(1260), DpiUtil.ScaleIntY(980)); StartPosition = FormStartPosition.CenterParent;
+			BackColor = DebuggerTheme.Background; ForeColor = DebuggerTheme.Text; Font = DebuggerTheme.UiFont;
+
+			header.Icon = Resources.B32x32_Page_Code; header.Title = "Instruction editor";
+			header.Subtitle = address == 0 ? "Enter a code address, then Load selection." : "0x" + address.ToString("X");
+
+			var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 7, Padding = new Padding(DpiUtil.ScaleIntX(8), DpiUtil.ScaleIntY(4), DpiUtil.ScaleIntX(8), DpiUtil.ScaleIntY(4)), BackColor = DebuggerTheme.Background };
+			layout.RowStyles.Add(new RowStyle(SizeType.AutoSize)); layout.RowStyles.Add(new RowStyle(SizeType.Percent, 31));
+			layout.RowStyles.Add(new RowStyle(SizeType.Percent, 25)); layout.RowStyles.Add(new RowStyle(SizeType.Absolute, DpiUtil.ScaleIntY(34)));
+			layout.RowStyles.Add(new RowStyle(SizeType.AutoSize)); layout.RowStyles.Add(new RowStyle(SizeType.Percent, 44));
+			layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
 			var top = Flow(); top.Controls.AddRange(new Control[] { Caption("Code address (hex or module+offset)"), addressBox, Caption("Selected bytes"), lengthBox, loadButton, Caption("Name"), nameBox });
-			layout.Controls.Add(top, 0, 0); layout.Controls.Add(Group("Original selection, operands and captured registers", originalBox), 0, 1);
-			var editors = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1 }; editors.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58)); editors.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42));
-			editors.Controls.Add(Group("Assembly (NASM, 64-bit)", assemblyBox), 0, 0); editors.Controls.Add(Group("Replacement hex bytes", hexBox), 1, 0); layout.Controls.Add(editors, 0, 2);
-			var modes = Flow(); modes.Controls.AddRange(new Control[] { Caption("Patch mode"), modeBox, Caption("Hook semantics"), semanticBox, prepareButton, cancelButton }); layout.Controls.Add(modes, 0, 3);
-			var locators = Flow(); locators.Controls.AddRange(new Control[] { Caption("Saved locator"), locatorBox, Caption("Pattern"), patternBox, Caption("Entry offset"), entryOffsetBox, moduleLabel }); layout.Controls.Add(locators, 0, 4);
-			layout.Controls.Add(Group("Change preview", previewBox), 0, 5);
-			var actions = Flow(); actions.Controls.AddRange(new Control[] { previewButton, applyButton, nopButton, restoreButton, saveButton, followRegisterButton, followOperandButton, reverseButton }); layout.Controls.Add(actions, 0, 6); layout.Controls.Add(status, 0, 7); Controls.Add(layout);
+			layout.Controls.Add(top, 0, 0);
+
+			var originalCard = new Card("Original selection, operands and captured registers");
+			var registersToggle = new ToggleChip("Registers", snapshot != null); var rawToggle = new ToggleChip("Raw");
+			originalCard.HeaderRight.Controls.Add(registersToggle); originalCard.HeaderRight.Controls.Add(rawToggle);
+			var capturedHost = new Panel { Dock = DockStyle.Right, Width = DpiUtil.ScaleIntX(440), Padding = new Padding(DpiUtil.ScaleIntX(8), 0, 0, 0), BackColor = DebuggerTheme.Panel, Visible = snapshot != null };
+			capturedHost.Controls.Add(capturedBoard);
+			originalBox.Visible = false;
+			originalCard.Body.Controls.Add(originalList); originalCard.Body.Controls.Add(originalBox); originalCard.Body.Controls.Add(capturedHost);
+			registersToggle.CheckedChanged += (s, e) => capturedHost.Visible = registersToggle.Checked;
+			rawToggle.CheckedChanged += (s, e) => { originalBox.Visible = rawToggle.Checked; originalList.Visible = !rawToggle.Checked; if (rawToggle.Checked) originalBox.BringToFront(); };
+			originalList.EmptyText = "Load selection decodes the original bytes here, one instruction per line, each explained in plain English.";
+			capturedBoard.EmptyText = "No registers were captured for this instruction.";
+			capturedBoard.FollowRequested += register => _ = RunAsync(() => FollowPointerAsync(register.Value));
+			layout.Controls.Add(originalCard, 0, 1);
+
+			var editors = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty, BackColor = DebuggerTheme.Background };
+			editors.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58)); editors.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42));
+			editors.Controls.Add(EditorCard("Assembly (NASM, 64-bit)", assemblyBox, assemblyNote), 0, 0); editors.Controls.Add(EditorCard("Replacement hex bytes", hexBox, hexNote), 1, 0);
+			layout.Controls.Add(editors, 0, 2);
+			sizeMeter.Margin = new Padding(DpiUtil.ScaleIntX(6), 0, DpiUtil.ScaleIntX(6), 0);
+			sizeMeter.SwitchToHookRequested += (s, e) => { if (modeBox.Enabled) modeBox.SelectedValue = PatchMode.Hook; };
+			layout.Controls.Add(sizeMeter, 0, 3);
+
+			var options = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = true, BackColor = DebuggerTheme.Background, Margin = Padding.Empty };
+			options.Controls.Add(OptionGroup("Patch mode", modeHelp, modeBox));
+			options.Controls.Add(OptionGroup("Hook semantics", semanticHelp, semanticBox));
+			patternFields.Controls.AddRange(new Control[] { Caption("Pattern"), patternBox, Caption("Entry offset"), entryOffsetBox });
+			options.Controls.Add(OptionGroup("Saved locator", locatorHelp, locatorBox, patternFields));
+			moduleLabel.ForeColor = DebuggerTheme.Muted; moduleLabel.Margin = new Padding(DpiUtil.ScaleIntX(10), DpiUtil.ScaleIntY(4), 0, DpiUtil.ScaleIntY(4));
+			options.Controls.Add(moduleLabel); options.SetFlowBreak(options.Controls[options.Controls.Count - 2], true);
+			layout.Controls.Add(options, 0, 4);
+
+			var previewCard = new Card("Change preview");
+			var detailsToggle = new ToggleChip("Details"); previewCard.HeaderRight.Controls.Add(detailsToggle);
+			previewBox.Visible = false;
+			previewCard.Body.Controls.Add(diffView); previewCard.Body.Controls.Add(previewBox);
+			detailsToggle.CheckedChanged += (s, e) => { previewBox.Visible = detailsToggle.Checked; diffView.Visible = !detailsToggle.Checked; if (detailsToggle.Checked) previewBox.BringToFront(); };
+			layout.Controls.Add(previewCard, 0, 5);
+
+			var actions = Flow(); actions.Controls.AddRange(new Control[] { previewButton, prepareButton, cancelButton, applyButton, restoreButton, nopButton, saveButton, Spacer(), followRegisterButton, followOperandButton, reverseButton });
+			layout.Controls.Add(actions, 0, 6);
+			Controls.Add(layout); Controls.Add(status); Controls.Add(rail); Controls.Add(header);
+			DebuggerTheme.Style(layout);
+			foreach (var box in new[] { originalBox, assemblyBox, hexBox, previewBox }) { box.BorderStyle = BorderStyle.None; box.BackColor = box.ReadOnly ? DebuggerTheme.Panel : DebuggerTheme.Raised; box.ForeColor = DebuggerTheme.Text; }
+			addressBox.Font = patternBox.Font = entryOffsetBox.Font = DebuggerTheme.Mono;
+			Tip(loadButton, "Read the original bytes at this address and decode them."); Tip(previewButton, "Show exactly which bytes would change. Nothing is written yet.");
+			Tip(applyButton, "Write the previewed change into the running game."); Tip(restoreButton, "Put the original bytes back.");
+			Tip(nopButton, "Replace the whole selection with NOP (do nothing) instructions."); Tip(saveButton, "Store this patch in the project so it can be applied again later.");
+			Tip(prepareButton, "Reserve hook memory and build the final hook code, so you can review it before Apply."); Tip(cancelButton, "Release a prepared hook without applying it.");
+			Tip(followRegisterButton, "Open the memory a captured register points at, as a class."); Tip(followOperandButton, "Open the memory this instruction's operand pointed at, as a class.");
+			Tip(reverseButton, "Watch this instruction and list every address it touches.");
+			DebuggerTheme.UseDarkChrome(this);
+
 			syncing = true;
 			addressBox.Text = address == 0 ? "" : address.ToString("X16"); nameBox.Text = this.definition.Name; lengthBox.Value = Math.Max(1, Math.Min(65536, this.definition.SelectionLength));
-			Choice.Select(modeBox, this.definition.Mode); Choice.Select(semanticBox, this.definition.HookMode); Choice.Select(locatorBox, this.definition.LocatorKind);
+			modeBox.SelectedValue = this.definition.Mode; semanticBox.SelectedValue = this.definition.HookMode; locatorBox.SelectedValue = this.definition.LocatorKind;
 			patternBox.Text = this.definition.Pattern ?? ""; entryOffsetBox.Text = this.definition.EntryOffset.ToString(CultureInfo.InvariantCulture);
 			assemblyBox.Text = this.definition.Assembly ?? ""; hexBox.Text = AssemblyService.FormatHex(this.definition.ReplacementBytes ?? new byte[0]); syncing = false;
 			assemblyBox.TextChanged += (s, e) => SourceEdited(PatchSourceKind.Assembly);
-			hexBox.TextChanged += (s, e) => SourceEdited(PatchSourceKind.Bytes);
+			hexBox.TextChanged += (s, e) => { SourceEdited(PatchSourceKind.Bytes); UpdateSizeMeter(); };
 			addressBox.TextChanged += (s, e) => SelectionEdited(); lengthBox.ValueChanged += (s, e) => SelectionEdited();
 			nameBox.TextChanged += (s, e) => DefinitionEdited(); modeBox.SelectedIndexChanged += (s, e) => DefinitionEdited(); semanticBox.SelectedIndexChanged += (s, e) => DefinitionEdited();
 			locatorBox.SelectedIndexChanged += (s, e) => DefinitionEdited(); patternBox.TextChanged += (s, e) => DefinitionEdited(); entryOffsetBox.TextChanged += (s, e) => DefinitionEdited();
@@ -102,7 +174,7 @@ namespace ReClassNET.Forms
 			followRegisterButton.Click += async (s, e) => await RunAsync(FollowRegisterAsync);
 			followOperandButton.Click += async (s, e) => await RunAsync(FollowOperandAsync);
 			reverseButton.Click += async (s, e) => await RunAsync(async () => { await CancelPreparationAsync(); new WatchFinderForm(workspace, Address(), 1, false, true).Show(this); });
-			nopButton.Click += (s, e) => { if (originals == null) return; Choice.Select(modeBox, PatchMode.InPlace); hexBox.Text = AssemblyService.FormatHex(Enumerable.Repeat((byte)0x90, originals.Length).ToArray()); authoritative = PatchSourceKind.Bytes; };
+			nopButton.Click += (s, e) => { if (originals == null) return; modeBox.SelectedValue = PatchMode.InPlace; hexBox.Text = AssemblyService.FormatHex(Enumerable.Repeat((byte)0x90, originals.Length).ToArray()); authoritative = PatchSourceKind.Bytes; };
 			workspace.Manager.Changed += ManagerChanged; workspace.Session.StateChanged += SessionChanged;
 			Shown += async (s, e) =>
 			{
@@ -117,20 +189,30 @@ namespace ReClassNET.Forms
 			UpdateButtons();
 		}
 
-		private static TextBox MakeCodeBox(bool readOnly) => new TextBox { AutoSize = false, Multiline = true, ScrollBars = ScrollBars.Both, WordWrap = false, ReadOnly = readOnly, AcceptsTab = !readOnly, MaxLength = 262144, Font = new Font(FontFamily.GenericMonospace, 10), Dock = DockStyle.Fill };
-		private static Label Caption(string text) => new Label { Text = text, AutoSize = true, Margin = new Padding(4, 8, 4, 0) };
-		private static FlowLayoutPanel Flow() => new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = true, AutoScroll = true };
-		private static GroupBox Group(string text, Control content) { var group = new GroupBox { Text = text, Dock = DockStyle.Fill, Padding = new Padding(6) }; group.Controls.Add(content); return group; }
-		private ulong Address() { ulong address; string error; if (!DebugWorkspace.TryParseCodeAddress(addressBox.Text, workspace.Process.Modules, out address, out error)) throw new FormatException(error); return address; }
-		private static class Choice
+		private static TextBox MakeCodeBox(bool readOnly) => new TextBox { AutoSize = false, Multiline = true, ScrollBars = readOnly ? ScrollBars.Both : ScrollBars.Vertical, WordWrap = false, ReadOnly = readOnly, AcceptsTab = !readOnly, MaxLength = 262144, Font = DebuggerTheme.Mono, Dock = DockStyle.Fill };
+		private static Label Caption(string text) => new Label { Text = text, AutoSize = true, ForeColor = DebuggerTheme.Muted, Margin = new Padding(DpiUtil.ScaleIntX(6), DpiUtil.ScaleIntY(9), DpiUtil.ScaleIntX(2), 0) };
+		private static Label Help() => new Label { AutoSize = true, ForeColor = DebuggerTheme.Muted, MaximumSize = new Size(DpiUtil.ScaleIntX(320), 0), Padding = new Padding(0, 0, DpiUtil.ScaleIntX(8), 0), Margin = new Padding(DpiUtil.ScaleIntX(4), DpiUtil.ScaleIntY(4), 0, 0) };
+		private static Control Spacer() => new Panel { Width = DpiUtil.ScaleIntX(24), Height = 1, Margin = Padding.Empty };
+		private static FlowLayoutPanel Flow() => new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = true, BackColor = DebuggerTheme.Background, Margin = new Padding(0, DpiUtil.ScaleIntY(2), 0, DpiUtil.ScaleIntY(2)) };
+		private void Tip(Control control, string text) => tips.SetToolTip(control, text);
+		private static Card EditorCard(string title, TextBox box, NoteLine note)
 		{
-			private sealed class Item<T> { public T Value; public string Text; public override string ToString() => Text; }
-			public static object Of<T>(T value, string text) => new Item<T> { Value = value, Text = text };
-			public static void Select<T>(ComboBox box, T value) { box.SelectedItem = box.Items.Cast<object>().FirstOrDefault(i => Equals(((Item<T>)i).Value, value)); }
-			public static T Value<T>(ComboBox box) => box.SelectedItem is Item<T> item ? item.Value : default(T);
+			var card = new Card(title);
+			var frame = new Panel { Dock = DockStyle.Fill, Padding = new Padding(1), BackColor = DebuggerTheme.Border };
+			frame.Controls.Add(box); card.Body.Controls.Add(frame); card.Body.Controls.Add(note);
+			return card;
 		}
-		private PatchMode SelectedMode => Choice.Value<PatchMode>(modeBox);
-		private PatchLocatorKind SelectedLocator => Choice.Value<PatchLocatorKind>(locatorBox);
+		private static ToolGroup OptionGroup(string caption, Label help, params Control[] row)
+		{
+			var group = new ToolGroup(caption) { FlowDirection = FlowDirection.TopDown };
+			var line = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, BackColor = DebuggerTheme.Panel, Margin = Padding.Empty };
+			line.Controls.AddRange(row);
+			group.Controls.Add(line); group.Controls.Add(help);
+			return group;
+		}
+		private ulong Address() { ulong address; string error; if (!DebugWorkspace.TryParseCodeAddress(addressBox.Text, workspace.Process.Modules, out address, out error)) throw new FormatException(error); return address; }
+		private PatchMode SelectedMode => modeBox.SelectedValue;
+		private PatchLocatorKind SelectedLocator => locatorBox.SelectedValue;
 		// Restore acts on this definition's live patch, or on whichever live patch owns the loaded selection.
 		private ActivePatch RestoreTarget()
 		{
@@ -151,7 +233,7 @@ namespace ReClassNET.Forms
 		private void SourceEdited(PatchSourceKind kind) { if (syncing) return; authoritative = kind; DefinitionEdited(); conversion?.Cancel(); debounce.Stop(); debounce.Start(); }
 		private void DefinitionEdited()
 		{
-			if (syncing) return; ++editVersion; preview = null; previewBox.Clear();
+			if (syncing) return; ++editVersion; preview = null; previewBox.Clear(); diffView.Clear(); restored = false;
 			if (prepared != null) { var pending = prepared; prepared = null; _ = ReleaseReservationAsync(pending.Id); }
 			UpdateButtons();
 		}
@@ -168,22 +250,27 @@ namespace ReClassNET.Forms
 				ulong origin = Address();
 				if (authoritative == PatchSourceKind.Assembly)
 				{
+					assemblyNote.Show(Severity.Neutral, "Assembling…");
 					var result = await workspace.Assembler.AssembleAsync(assemblyBox.Text, origin, token);
 					if (IsDisposed || token.IsCancellationRequested || version != editVersion) return;
-					if (!result.Success) { status.Text = string.Join("; ", result.Diagnostics.Select(d => d.ToString())); return; }
+					if (!result.Success) { status.Text = string.Join("; ", result.Diagnostics.Select(d => d.ToString())); assemblyNote.Show(Severity.Danger, result.Diagnostics.Count > 0 ? result.Diagnostics[0].ToString() : "NASM could not assemble this."); return; }
 					syncing = true; hexBox.Text = AssemblyService.FormatHex(result.Bytes); syncing = false;
 					status.Text = "Assembly produced " + result.Bytes.Length + " bytes at 0x" + origin.ToString("X") + ". Preview before applying.";
+					assemblyNote.Show(Severity.Success, "Assembles to " + result.Bytes.Length + " byte" + (result.Bytes.Length == 1 ? "" : "s") + ".");
+					hexNote.Show(Severity.Neutral, "Generated from the assembly.");
 				}
 				else
 				{
 					var bytes = AssemblyService.ParseHex(hexBox.Text); var decode = workspace.Instructions.Decode(bytes, origin);
-					if (!decode.Success) throw new FormatException(decode.Error);
+					if (!decode.Success) { hexNote.Show(Severity.Danger, decode.Error); throw new FormatException(decode.Error); }
 					syncing = true; assemblyBox.Text = string.Join(Environment.NewLine, decode.Instructions.Select(i => i.Text)); syncing = false;
 					status.Text = "Hex is authoritative: " + bytes.Length + " replacement bytes. Preview before applying.";
+					hexNote.Show(Severity.Success, bytes.Length + " byte" + (bytes.Length == 1 ? "" : "s") + ", " + decode.Instructions.Count + " instruction" + (decode.Instructions.Count == 1 ? "" : "s") + ".");
+					assemblyNote.Show(Severity.Neutral, "Decoded from the hex bytes.");
 				}
 			}
 			catch (Exception ex) { if (!IsDisposed && version == editVersion) status.Text = ex.Message; }
-			finally { syncing = false; }
+			finally { syncing = false; UpdateSizeMeter(); UpdateButtons(); }
 		}
 
 		private async Task LoadSelectionAsync(bool initial)
@@ -216,12 +303,29 @@ namespace ReClassNET.Forms
 				text.AppendLine("Saved original bytes are shown below. Current bytes differ; Preview will reject a stale original.");
 				text.AppendLine("Current bytes: " + AssemblyService.FormatHex(data));
 			}
-			foreach (var record in decoded.Instructions) { text.AppendLine(record.Address.ToString("X16") + "  " + AssemblyService.FormatHex(record.Bytes) + "  " + record.Text); text.AppendLine(workspace.Instructions.Explain(record, snapshot?.Registers, labels, null, null, snapshot != null && snapshot.Phase == SnapshotPhase.Before && snapshot.Context.Rip == record.Address).Text); }
+			var listed = new List<ListedInstruction>();
+			foreach (var record in decoded.Instructions)
+			{
+				bool atCapture = snapshot != null && snapshot.Phase == SnapshotPhase.Before && snapshot.Context.Rip == record.Address;
+				var explanation = workspace.Instructions.Explain(record, snapshot?.Registers, labels, null, null, atCapture).Text;
+				text.AppendLine(record.Address.ToString("X16") + "  " + AssemblyService.FormatHex(record.Bytes) + "  " + record.Text); text.AppendLine(explanation);
+				var item = new ListedInstruction { Address = record.Address, Bytes = record.Bytes, Tokens = AsmTokens.Tokenize(record), Text = record.Text, Explanation = explanation };
+				if (record.Address == address && definition.Boundary == BoundarySource.Execution) { item.Accent = Severity.Success; item.Badges.Add(new ListedBadge("CONFIRMED", Severity.Success)); }
+				if (atCapture) item.Badges.Add(new ListedBadge("CAPTURED HERE", Severity.Info));
+				listed.Add(item);
+			}
 			if (snapshot != null) { text.AppendLine("Captured thread " + snapshot.ThreadId + ", " + snapshot.Timestamp.ToLocalTime().ToString("G") + ", phase " + snapshot.Phase); foreach (var register in snapshot.Registers) text.Append(register.Key.ToUpperInvariant() + "=" + register.Value.ToString("X16") + "  "); text.AppendLine(); }
 			text.AppendLine("Boundary: " + definition.Boundary + ". The code address is separate from any watched data address.");
 			originalBox.Text = text.ToString();
+			originalList.SetItems(listed, decoded.Instructions.Count + " INSTRUCTION" + (decoded.Instructions.Count == 1 ? "" : "S") + " · " + loadedLength + " BYTES" + (saved && !originals.SequenceEqual(data) ? " · SAVED ORIGINALS (CURRENT BYTES DIFFER)" : ""));
+			if (snapshot != null)
+			{
+				var used = decoded.Instructions.SelectMany(i => i.UsedRegisters).Where(r => r.Register != Iced.Intel.Register.None).Select(r => Iced.Intel.RegisterExtensions.GetFullRegister(r.Register).ToString().ToLowerInvariant());
+				capturedBoard.SetRegisters(RegisterHighlights.Build(snapshot.Registers, used, 0, 0, null), "CAPTURED " + snapshot.Phase.ToString().ToUpperInvariant() + " · THREAD " + snapshot.ThreadId + " · CLICK TO FOLLOW");
+			}
 			var module = await Task.Run(() => workspace.Target.Modules.SingleOrDefault(m => address >= m.BaseAddress && address - m.BaseAddress < m.Size));
 			moduleLabel.Text = module == null ? "No module at this address; session-only draft." : "Module: " + module.Name + ", offset 0x" + (address - module.BaseAddress).ToString("X") + ", SHA-256 " + (module.Sha256 ?? "unavailable");
+			header.Subtitle = "0x" + address.ToString("X") + (module == null ? "  ·  not inside a module" : "  ·  " + module.Name + " + 0x" + (address - module.BaseAddress).ToString("X")) + "  ·  " + loadedLength + " byte" + (loadedLength == 1 ? "" : "s") + " selected";
 			status.Text = saved && !originals.SequenceEqual(data) ? "Conflict: current bytes differ from the saved originals. Restore or choose an explicit new selection." : "Original bytes captured. Choose Preview to inspect a change.";
 			preview = null; prepared = null; ++editVersion; UpdateButtons();
 			await ConvertAsync();
@@ -233,7 +337,7 @@ namespace ReClassNET.Forms
 			if (originals == null || Address() != loadedAddress || (int)lengthBox.Value != loadedLength) throw new InvalidOperationException("Load the selected original instruction span first.");
 			var result = definition.Clone(); result.Name = nameBox.Text.Trim(); if (result.Name.Length == 0) result.Name = "Patch";
 			result.Platform = workspace.Target.Platform; result.Architecture = "x64"; result.SessionAddress = loadedAddress; result.SessionId = workspace.Target.SessionId;
-			result.SelectionLength = loadedLength; result.ExpectedBytes = (byte[])originals.Clone(); result.Mode = SelectedMode; result.HookMode = Choice.Value<HookSemanticMode>(semanticBox);
+			result.SelectionLength = loadedLength; result.ExpectedBytes = (byte[])originals.Clone(); result.Mode = SelectedMode; result.HookMode = semanticBox.SelectedValue;
 			result.SourceKind = authoritative; result.Assembly = assemblyBox.Text; result.ReplacementBytes = authoritative == PatchSourceKind.Bytes ? AssemblyService.ParseHex(hexBox.Text) : null;
 			result.LocatorKind = SelectedLocator;
 			if (result.LocatorKind != PatchLocatorKind.SessionAddress)
@@ -263,7 +367,7 @@ namespace ReClassNET.Forms
 		}
 		private void RenderPreview()
 		{
-			var text = new StringBuilder(); if (preview == null) { previewBox.Clear(); return; }
+			var text = new StringBuilder(); if (preview == null) { previewBox.Clear(); diffView.Clear(); return; }
 			text.AppendLine("Status: " + preview.Status + " " + preview.Message);
 			if (preview.OriginalBytes != null) { text.AppendLine("Code address 0x" + preview.Address.ToString("X") + "; selected original " + preview.OriginalBytes.Length + " bytes"); text.AppendLine("Original: " + AssemblyService.FormatHex(preview.OriginalBytes)); }
 			if (preview.ReplacementBytes != null) { text.AppendLine("Replacement preview: " + AssemblyService.FormatHex(preview.ReplacementBytes)); text.AppendLine("NOP padding: " + preview.PaddingLength + " bytes"); }
@@ -281,11 +385,38 @@ namespace ReClassNET.Forms
 				text.AppendLine("After publication, hook memory is retained until target exit, including after Restore.");
 			}
 			previewBox.Text = text.ToString();
+			ShowPicture();
+		}
+		// The picture version of the preview: a byte-by-byte diff, or the hook's jump out and back.
+		private void ShowPicture()
+		{
+			if (prepared != null)
+			{
+				var model = new ByteDiffView.HookModel
+				{
+					Site = prepared.Preview.Address, Allocation = prepared.Allocation.Address, ReturnAddress = prepared.ReturnAddress, EntryBytes = prepared.EntryBytes,
+					Semantics = semanticBox.Options().FirstOrDefault(o => Equals(o.Value, prepared.Preview.Definition.HookMode))?.Label ?? prepared.Preview.Definition.HookMode.ToString(),
+					YourCode = prepared.UserBodyInstructions.Select(i => new ListedInstruction { Address = i.Address, Bytes = i.Bytes, Tokens = AsmTokens.Tokenize(i), Text = i.Text }).ToList(),
+					Displaced = prepared.DisplacedInstructions.Select(i => new ListedInstruction { Address = i.Address, Bytes = i.Bytes, Tokens = AsmTokens.Tokenize(i), Text = i.Text }).ToList()
+				};
+				diffView.ShowHook(model, "Hook prepared: the game jumps out at 0x" + prepared.Preview.Address.ToString("X") + ", runs the hook code, and comes back. Nothing is written until you click Apply.");
+				return;
+			}
+			if (preview.OriginalBytes == null) { diffView.Clear(); diffView.EmptyText = preview.Status + ": " + preview.Message; return; }
+			var before = workspace.Instructions.Decode(preview.OriginalBytes, preview.Address);
+			var replacement = preview.ReplacementBytes ?? new byte[0];
+			var after = workspace.Instructions.Decode(replacement, preview.Address);
+			string summary = preview.Status == PatchStatus.Previewed
+				? (preview.Definition.Mode == PatchMode.Hook ? "Hook preview at 0x" + preview.Address.ToString("X") + ". Click Prepare hook to build the hook code, then Apply." : "At 0x" + preview.Address.ToString("X") + ": " + preview.OriginalBytes.Length + " original bytes become " + replacement.Length + (preview.PaddingLength > 0 ? " (" + preview.PaddingLength + " NOP padding)" : "") + ". Nothing is written until you click Apply.")
+				: preview.Status + ": " + preview.Message;
+			diffView.ShowInPlace(preview.Address, ByteDiff.Build(preview.OriginalBytes, replacement, preview.PaddingLength),
+				before.Success ? before.Instructions.Select(AsmTokens.Tokenize) : new[] { AsmTokens.Tokenize(AssemblyService.FormatHex(preview.OriginalBytes)) },
+				after.Success ? after.Instructions.Select(AsmTokens.Tokenize) : new[] { AsmTokens.Tokenize(AssemblyService.FormatHex(replacement)) }, summary);
 		}
 		private async Task ApplyAsync()
 		{
 			PatchResult result; if (prepared != null) result = await workspace.Manager.ApplyAsync(prepared, operation.Token); else if (preview?.CanApply == true) result = await workspace.Manager.ApplyAsync(preview, operation.Token); else throw new InvalidOperationException("A current valid preview or prepared hook is required.");
-			status.Text = result.Message; if (result.Status == PatchStatus.Active && result.Patch != null) { definition = result.Patch.Preview.Definition.Clone(); prepared = null; preview = null; }
+			status.Text = result.Message; if (result.Status == PatchStatus.Active && result.Patch != null) { definition = result.Patch.Preview.Definition.Clone(); prepared = null; preview = null; restored = false; }
 		}
 		private async Task RestoreAsync()
 		{
@@ -298,6 +429,7 @@ namespace ReClassNET.Forms
 				else if (choice == PatchConflictChoice.Abandon) result = await workspace.Manager.AbandonAsync(target.Id, operation.Token);
 			}
 			status.Text = result.Message; preview = null; RenderPreview();
+			restored = result.Success;
 		}
 		private async Task CancelPreparationAsync() { if (prepared == null) return; var result = await workspace.Manager.CancelPreparationAsync(prepared.Id); if (!result.Success) throw new InvalidOperationException(result.Message); prepared = null; preview = null; status.Text = result.Message; }
 		private async Task SaveAsync()
@@ -351,11 +483,12 @@ namespace ReClassNET.Forms
 		}
 		private int ChooseCaptured(string title, string[] choices)
 		{
-			using (var dialog = new Form { Text = title, Size = new Size(530, 160), StartPosition = FormStartPosition.CenterParent }) {
-				var choicesBox = new ComboBox { Dock = DockStyle.Top, DropDownStyle = ComboBoxStyle.DropDownList }; choicesBox.Items.AddRange(choices); choicesBox.SelectedIndex = 0;
-				var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, FlowDirection = FlowDirection.RightToLeft, Height = 36 };
-				var follow = new Button { Text = "Follow current memory", AutoSize = true, DialogResult = DialogResult.OK }; var cancel = new Button { Text = "Cancel", AutoSize = true, DialogResult = DialogResult.Cancel };
+			using (var dialog = new Form { Text = title, Size = new Size(DpiUtil.ScaleIntX(560), DpiUtil.ScaleIntY(170)), StartPosition = FormStartPosition.CenterParent, Padding = new Padding(DpiUtil.ScaleIntX(10)) }) {
+				var choicesBox = new ComboBox { Dock = DockStyle.Top, DropDownStyle = ComboBoxStyle.DropDownList, Font = DebuggerTheme.Mono }; choicesBox.Items.AddRange(choices); choicesBox.SelectedIndex = 0;
+				var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, FlowDirection = FlowDirection.RightToLeft, Height = DpiUtil.ScaleIntY(40) };
+				var follow = new DarkButton("Follow current memory", null, DarkButtonStyle.Primary) { DialogResult = DialogResult.OK }; var cancel = new DarkButton("Cancel") { DialogResult = DialogResult.Cancel };
 				buttons.Controls.Add(cancel); buttons.Controls.Add(follow); dialog.Controls.Add(choicesBox); dialog.Controls.Add(buttons); dialog.AcceptButton = follow; dialog.CancelButton = cancel;
+				DebuggerTheme.StyleDialog(dialog);
 				return dialog.ShowDialog(this) == DialogResult.OK ? choicesBox.SelectedIndex : -1;
 			}
 		}
@@ -365,6 +498,8 @@ namespace ReClassNET.Forms
 			try { await action(); } catch (OperationCanceledException) { if (!IsDisposed) status.Text = "Operation cancelled."; } catch (Exception ex) { if (!IsDisposed) status.Text = ex.Message; }
 			finally { operation.Dispose(); operation = null; busy = false; if (!IsDisposed) { UpdateButtons(); if (closeRequested) { closeRequested = false; BeginInvoke(new Action(Close)); } } }
 		}
+		private int ReplacementLength() { try { return AssemblyService.ParseHex(hexBox.Text).Length; } catch (Exception) { return -1; } }
+		private void UpdateSizeMeter() => sizeMeter.Show(originals?.Length ?? 0, originals == null ? -1 : ReplacementLength(), SelectedMode == PatchMode.Hook);
 		private void UpdateButtons()
 		{
 			if (!busy && prepared != null && !ReferenceEquals(workspace.Manager.Preparation, prepared)) {
@@ -375,13 +510,34 @@ namespace ReClassNET.Forms
 			loadButton.Enabled = previewButton.Enabled = editable; nopButton.Enabled = editable && originals != null;
 			prepareButton.Enabled = editable && SelectedMode == PatchMode.Hook && workspace.Target.SupportsAllocation;
 			applyButton.Enabled = editable && (prepared != null || preview?.CanApply == true);
-			restoreButton.Enabled = !busy && RestoreTarget() != null;
+			var live = RestoreTarget();
+			restoreButton.Enabled = !busy && live != null;
 			saveButton.Enabled = editable && originals != null && !repository.IsReadOnly;
 			cancelButton.Enabled = !busy && prepared != null;
 			followRegisterButton.Enabled = editable && snapshot != null && snapshot.Registers.Count != 0;
 			followOperandButton.Enabled = editable && originals != null && snapshot != null;
 			reverseButton.Enabled = editable && originals != null;
 			patternBox.Enabled = editable && SelectedLocator == PatchLocatorKind.ModulePattern; entryOffsetBox.Enabled = patternBox.Enabled;
+			// Presentation only: what is visible, what glows, and where the Inspect → Restore flow stands.
+			prepareButton.Visible = cancelButton.Visible = SelectedMode == PatchMode.Hook;
+			patternFields.Visible = SelectedLocator == PatchLocatorKind.ModulePattern;
+			modeHelp.Text = modeBox.SelectedDescription; semanticHelp.Text = SelectedMode == PatchMode.Hook ? semanticBox.SelectedDescription : "Only used in Hook mode. " + semanticBox.SelectedDescription; locatorHelp.Text = locatorBox.SelectedDescription;
+			byte[] replacement = null; try { replacement = AssemblyService.ParseHex(hexBox.Text); } catch (Exception) { }
+			var state = new PatchStepState { OriginalsLoaded = originals != null, Edited = originals != null && replacement != null && !replacement.SequenceEqual(originals) || SelectedMode == PatchMode.Hook && originals != null, PreviewCurrent = prepared != null || (preview != null && preview.Status == PatchStatus.Previewed && (SelectedMode == PatchMode.InPlace || prepared != null)), Active = live != null, Restored = restored, HookMode = SelectedMode == PatchMode.Hook };
+			var step = PatchSteps.Current(state);
+			rail.Show(step, PatchSteps.Hint(state));
+			loadButton.Glow = step == PatchStep.Inspect && loadButton.Enabled;
+			previewButton.Glow = step == PatchStep.Preview && SelectedMode == PatchMode.InPlace && previewButton.Enabled;
+			prepareButton.Glow = step == PatchStep.Preview && SelectedMode == PatchMode.Hook && prepareButton.Enabled;
+			applyButton.Glow = step == PatchStep.Apply && applyButton.Enabled;
+			restoreButton.Glow = step == PatchStep.Restore && restoreButton.Enabled;
+			var boundaryPill = definition.Boundary == BoundarySource.Execution ? new DebuggerHeader.HeaderPill { Text = "CONFIRMED BY EXECUTION", Severity = Severity.Success }
+				: definition.Boundary == BoundarySource.Uncertain ? new DebuggerHeader.HeaderPill { Text = "BOUNDARY UNCERTAIN", Severity = Severity.Attention }
+				: new DebuggerHeader.HeaderPill { Text = "MANUAL ADDRESS", Severity = Severity.Neutral };
+			header.SetPills(boundaryPill,
+				prepared != null ? new DebuggerHeader.HeaderPill { Text = "HOOK PREPARED", Severity = Severity.Info, Pulse = true } : null,
+				live != null ? new DebuggerHeader.HeaderPill { Text = "PATCH ACTIVE", Severity = Severity.Danger, Pulse = true, Solid = true } : null);
+			UpdateSizeMeter();
 		}
 		private void ManagerChanged(object sender, EventArgs e) => QueueUpdate();
 		private void SessionChanged(DebugSessionState state) => QueueUpdate();
@@ -394,7 +550,7 @@ namespace ReClassNET.Forms
 			if (prepared == null) return;
 			e.Cancel = true; await RunAsync(async () => { await CancelPreparationAsync(); closingAfterCleanup = true; }); if (closingAfterCleanup) Close();
 		}
-		private void EditorClosed(object sender, FormClosedEventArgs e) { workspace.Manager.Changed -= ManagerChanged; workspace.Session.StateChanged -= SessionChanged; conversion?.Cancel(); conversion?.Dispose(); debounce.Dispose(); GlobalWindowManager.RemoveWindow(this); }
+		private void EditorClosed(object sender, FormClosedEventArgs e) { workspace.Manager.Changed -= ManagerChanged; workspace.Session.StateChanged -= SessionChanged; conversion?.Cancel(); conversion?.Dispose(); debounce.Dispose(); tips.Dispose(); GlobalWindowManager.RemoveWindow(this); }
 		protected override void OnLoad(EventArgs e) { base.OnLoad(e); GlobalWindowManager.AddWindow(this); }
 	}
 }

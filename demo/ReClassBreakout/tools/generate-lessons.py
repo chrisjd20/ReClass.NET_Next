@@ -12,6 +12,39 @@ import re
 from pathlib import Path
 
 TOKEN = re.compile(r"\{\{([A-Za-z0-9_.]+)\}\}")
+LIVE = re.compile(r"\{\{live\.([A-Za-z0-9_.]+)\}\}")
+# Runtime values the game substitutes into the Steps panel each frame (see
+# Game::liveText in src/game.cpp and liveValues in src/frontend.cpp). The
+# offline guides cannot know them, so they print this wording instead. Keep
+# these lists in sync with the game.
+LIVE_ADDRESSES = {
+    "rookie": "ROOKIE's address",
+    "inventory": "the inventory's address",
+    "weapon": "the equipped weapon's address",
+    "world": "the control block's address",
+    "enemy": "the sentinel's address",
+    "root": "the static pointer's address",
+    "damage.site": "the damage instruction's address",
+    "damage.decoy": "the damage instruction's address + 1",
+    "ammo.site": "the ammo instruction's address",
+    "badge.read": "the badge read instruction's address",
+    "badge.decoy": "the badge read instruction's address + 1",
+    "vault.entry": "the vault check's address",
+    "vault.deny": "the vault's deny address",
+}
+LIVE_TOKENS = {
+    "module": "the game's module name",
+    "root.offset": "the static pointer's module offset",
+    "root.expr": "[<module>+offset] from the green result",
+    "override": "the override code, in decimal",
+    "override.r9": "R9's value",
+}
+for _name, _wording in LIVE_ADDRESSES.items():
+    LIVE_TOKENS[_name] = _wording
+    LIVE_TOKENS[_name + ".row"] = _wording + ", 16 digits"
+    LIVE_TOKENS[_name + ".hex"] = _wording + ", 0x…"
+    LIVE_TOKENS[_name + ".mod"] = _wording + " as module+offset"
+    LIVE_TOKENS[_name + ".grid"] = _wording + " as module + offset"
 
 
 def flatten(value, prefix=""):
@@ -28,6 +61,11 @@ def expand(value, variables):
     if isinstance(value, str):
         def replace(match):
             key = match.group(1)
+            if key.startswith("live."):
+                # Resolved by the game at runtime; only the name is checked here.
+                if key[5:] not in LIVE_TOKENS:
+                    raise ValueError(f"Unknown live value {key}")
+                return match.group(0)
             if key not in variables:
                 raise ValueError(f"No layout value supplied for {key}")
             return variables[key]
@@ -36,6 +74,17 @@ def expand(value, variables):
         return [expand(child, variables) for child in value]
     if isinstance(value, dict):
         return {key: expand(child, variables) for key, child in value.items()}
+    return value
+
+
+def offline(value):
+    """Replace runtime-only live tokens with wording for the offline guides."""
+    if isinstance(value, str):
+        return LIVE.sub(lambda m: "‹" + LIVE_TOKENS[m.group(1)] + "›", value)
+    if isinstance(value, list):
+        return [offline(child) for child in value]
+    if isinstance(value, dict):
+        return {key: offline(child) for key, child in value.items()}
     return value
 
 
@@ -84,7 +133,7 @@ def validate(data):
             loop = step.get("loop", 0)
             if not isinstance(loop, int) or loop < 0 or loop > len(lesson["steps"]):
                 raise ValueError(f"Room {lesson['id']} has an invalid loop target")
-            for key in ("why", "see"):
+            for key in ("why", "see", "show"):
                 if key in step and (not isinstance(step[key], str) or not step[key].strip()):
                     raise ValueError(f"Room {lesson['id']} has an empty {key}")
             if step["text"].count("`") % 2:
@@ -104,7 +153,8 @@ def generate_cpp(data, lessons):
         for step in lesson['steps']:
             lines.append('                {' + ', '.join(cpp_string(step.get(key, '')) for key in
                                                        ('where', 'text', 'check')) + ', ' + str(step.get('loop', 0)) + ', ' +
-                         cpp_string(step.get('why', '')) + ', ' + cpp_string(step.get('see', '')) + '},')
+                         cpp_string(step.get('why', '')) + ', ' + cpp_string(step.get('see', '')) + ', ' +
+                         cpp_string(step.get('show', '')) + '},')
         lines.append('            },')
         lines.append('            ' + cpp_string(lesson['learned']) + ', ' + cpp_string(lesson.get('restore', '')) + ',')
         lines.append('            {' + ', '.join('{' + cpp_string(x['title']) + ', ' + cpp_string(x['text']) + '}' for x in lesson['explain']) + '}},')
@@ -126,7 +176,8 @@ def markdown_text(value):
 
 def generate_markdown(data, lessons):
     lines = ['# ReClass: Breakout — Offline guide', '', data['introduction'], '',
-             'This guide has no network dependencies. Keep it open beside ReClass: a ReClass debugger pause also freezes the game window.', '']
+             'This guide has no network dependencies. Keep it open beside ReClass: a ReClass debugger pause also freezes the game window.',
+             '', 'Values in ‹angle quotes› change every run. The game\'s Steps panel shows their current numbers.', '']
     chapter = None
     for lesson in lessons:
         if lesson['chapter'] != chapter:
@@ -137,6 +188,9 @@ def generate_markdown(data, lessons):
             lines += [f"{index}. **{TAG[step['where']]}** — " + markdown_text(step['text']), '']
             if step.get('why'):
                 lines += [f"   *Why:* {step['why']}", '']
+            if step.get('show'):
+                lines += ['   *In ReClass it should look like:*', '', '   ```'] + \
+                         ['   ' + line for line in step['show'].split('\n')] + ['   ```', '']
             if step.get('see'):
                 lines += [f"   *You should see:* {step['see']}", '']
             if step.get('loop'):
@@ -164,7 +218,8 @@ def generate_html(data, lessons):
              '<style>body{margin:auto;padding:2rem;max-width:60rem;background:#101923;color:#eef3f7;font:18px/1.6 system-ui,sans-serif}a{color:#8ed5ff}nav a{display:inline-block;margin:0 .8rem .4rem 0}h1,h2{line-height:1.25}h2{margin-top:2.5rem;border-top:1px solid #526272;padding-top:1rem}ol li{margin:.6rem 0;white-space:pre-wrap}.tag{display:inline-block;font-size:.72rem;font-weight:700;padding:.05rem .45rem;border-radius:.6rem;margin-right:.5rem}.game{background:#173d36;color:#48dbb5}.reclass{background:#2c2047;color:#b084ff}code{background:#1e2c3d;color:#48dbb5;padding:.05rem .3rem;border-radius:.25rem}.goal{border-left:3px solid #48dbb5;padding-left:1rem}.learned{color:#a9bbd0;font-style:italic}.restore{color:#f9bf57}.repeat{color:#f9bf57}.why{color:#a9bbd0}.explain{border:1px solid #526272;border-radius:.4rem;padding:.4rem 1rem;margin:1rem 0}.explain summary{cursor:pointer;color:#48dbb5;font-weight:700}.callout{border-left:3px solid #f9bf57;padding-left:1rem;color:#f9bf57}pre{background:#0c131d;color:#48dbb5;padding:.6rem;border-radius:.3rem;overflow-x:auto}.see{color:#f9bf57}@media print{body{background:white;color:black}}</style>',
              '</head><body><h1>ReClass: Breakout — Offline guide</h1>',
              '<p>' + html_text(data['introduction']) + '</p>',
-             '<p>Keep this guide open beside ReClass: a ReClass debugger pause also freezes the game window.</p>', '<nav aria-label="Rooms">']
+             '<p>Keep this guide open beside ReClass: a ReClass debugger pause also freezes the game window.</p>',
+             '<p>Values in ‹angle quotes› change every run. The game\'s Steps panel shows their current numbers.</p>', '<nav aria-label="Rooms">']
     for lesson in lessons:
         lines.append(f'<a href="#room-{lesson["id"]}">{lesson["id"]}. {html.escape(lesson["title"])}</a>')
     lines += ['<a href="#find-rookie">Find ROOKIE again</a>', '</nav>']
@@ -174,8 +229,9 @@ def generate_html(data, lessons):
         for step in lesson['steps']:
             repeat = f'<br><em class="repeat">Still too many results? Repeat steps {step["loop"]}–{lesson["steps"].index(step) + 1}. Several rounds are normal.</em>' if step.get('loop') else ''
             why = f'<br><span class="why">Why: {html_text(step["why"])}</span>' if step.get('why') else ''
+            show = f'<br><span class="why">In ReClass it should look like:</span><pre>{html.escape(step["show"])}</pre>' if step.get('show') else ''
             see = f'<br><span class="see">You should see: {html_text(step["see"])}</span>' if step.get('see') else ''
-            lines.append(f'<li><span class="tag {step["where"]}">{TAG[step["where"]]}</span>' + html_text(step['text']) + why + see + repeat + '</li>')
+            lines.append(f'<li><span class="tag {step["where"]}">{TAG[step["where"]]}</span>' + html_text(step['text']) + why + show + see + repeat + '</li>')
         lines.append('</ol>')
         if lesson.get('restore'):
             lines.append('<p class="restore">Before leaving: ' + html_text(lesson['restore']) + '</p>')
@@ -219,9 +275,10 @@ def main():
     data = expand(data, variables)
     lessons = validate(data)
     args.output_dir.mkdir(parents=True, exist_ok=True)
+    guide = offline(data)
     outputs = {'lessons.generated.cpp': generate_cpp(data, lessons),
-               'GUIDE.md': generate_markdown(data, lessons),
-               'GUIDE.html': generate_html(data, lessons)}
+               'GUIDE.md': generate_markdown(guide, guide['lessons']),
+               'GUIDE.html': generate_html(guide, guide['lessons'])}
     for name, value in outputs.items():
         (args.output_dir / name).write_text(value, encoding='utf-8', newline='\n')
 

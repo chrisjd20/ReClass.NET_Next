@@ -6,6 +6,7 @@
 #include "ui.h"
 #include "raylib.h"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -59,6 +60,65 @@ std::string moduleReference(std::uintptr_t address) {
     if (!base || address < base || name.empty()) return "module offset unavailable";
     return name + "+" + hexAddress(address - base);
 }
+// Current values for {{live.NAME}} lesson tokens. Every address comes in the
+// shapes ReClass prints: bare uppercase hex (class header, Scanner input),
+// .row (16 digits, row and Code address columns), .hex (0x…, watch windows)
+// and, inside the module, .mod (name+0x…) and .grid (name + 0x…). Names match
+// LIVE_TOKENS in tools/generate-lessons.py. Only text is kept here.
+using LiveValues = std::vector<std::pair<std::string, std::string>>;
+LiveValues liveValues(const Game& game) {
+    LiveValues values;
+    for (const auto& [name, text] : game.liveText()) {
+        if (name == "override") {
+            const auto code = std::strtoull(text.c_str(), nullptr, 10);
+            std::ostringstream r9;
+            r9 << "0x" << std::hex << std::uppercase << std::setw(16) << std::setfill('0') << code;
+            values.push_back({name, text});
+            values.push_back({name + ".r9", r9.str()});
+            continue;
+        }
+        const auto address = static_cast<std::uintptr_t>(std::strtoull(text.c_str(), nullptr, 16));
+        std::ostringstream bare, row;
+        bare << std::hex << std::uppercase << address;
+        row << std::hex << std::uppercase << std::setw(16) << std::setfill('0') << address;
+        values.push_back({name, address ? bare.str() : "?"});
+        values.push_back({name + ".row", address ? row.str() : "?"});
+        values.push_back({name + ".hex", address ? "0x" + bare.str() : "?"});
+        const std::string reference = address ? moduleReference(address) : std::string();
+        const auto plus = reference.rfind('+');
+        if (plus == std::string::npos) continue;
+        const std::string module = reference.substr(0, plus), offset = reference.substr(plus + 1);
+        values.push_back({name + ".mod", reference});
+        values.push_back({name + ".grid", module + " + " + offset});
+        if (name == "root") {
+            values.push_back({"module", module});
+            values.push_back({"root.offset", offset});
+            values.push_back({"root.expr", "[<" + module + ">+" + offset + "]"});
+        }
+    }
+    return values;
+}
+std::string live(std::string value, const LiveValues& values) {
+    static const std::string open = "{{live.";
+    std::size_t at = 0;
+    while ((at = value.find(open, at)) != std::string::npos) {
+        const auto close = value.find("}}", at);
+        if (close == std::string::npos) break;
+        const std::string name = value.substr(at + open.size(), close - at - open.size());
+        std::string replacement = "?";
+        for (const auto& entry : values) if (entry.first == name) { replacement = entry.second; break; }
+        value.replace(at, close + 2 - at, replacement);
+        at += replacement.size();
+    }
+    return value;
+}
+Lesson live(Lesson lesson, const LiveValues& values) {
+    for (auto* field : {&lesson.goal, &lesson.learned, &lesson.restore}) *field = live(*field, values);
+    for (auto& step : lesson.steps)
+        for (auto* field : {&step.text, &step.why, &step.see, &step.show}) *field = live(*field, values);
+    for (auto& section : lesson.explain) section.text = live(section.text, values);
+    return lesson;
+}
 std::string quoted(std::string value) {
     for (auto& ch : value) if (ch == '\n' || ch == '\r' || ch == '"') ch = ' ';
     return '"' + value + '"';
@@ -83,8 +143,10 @@ std::string plain(std::string value) {
 std::string instructions(const Lesson& lesson) {
     std::ostringstream out;
     out << "Room " << lesson.id << ": " << lesson.title << "\nGoal: " << plain(lesson.goal) << "\n";
-    for (std::size_t i = 0; i < lesson.steps.size(); ++i)
+    for (std::size_t i = 0; i < lesson.steps.size(); ++i) {
         out << "\n" << i + 1 << ". [" << (lesson.steps[i].where == "game" ? "IN GAME" : "IN RECLASS") << "] " << plain(lesson.steps[i].text) << '\n';
+        if (!lesson.steps[i].show.empty()) out << "   In ReClass it should look like:\n" << lesson.steps[i].show << '\n';
+    }
     if (!lesson.restore.empty()) out << "\nBefore leaving: " << plain(lesson.restore) << '\n';
     return out.str();
 }
@@ -194,6 +256,37 @@ float rich(const std::string& value, float x, float y, float width, float size, 
         at = end + 1;
     }
     return y;
+}
+// The "IN RECLASS IT SHOULD LOOK LIKE" mock: monospace lines on a dark panel,
+// wrapped by character so long addresses are never clipped. Text from "<-"
+// onwards is a note and drawn in gold.
+float showPanel(const std::string& value, float x, float y, float width, float size) {
+    text("IN RECLASS IT SHOULD LOOK LIKE", x, y + 2, 10, Blue, Face::Bold);
+    y += 18;
+    const float charW = std::max(1.0f, textWidth("0000000000", size, Face::Mono) / 10);
+    const auto columns = static_cast<std::size_t>(std::max(8.0f, (width - 16) / charW));
+    std::vector<std::string> lines;
+    std::size_t at = 0;
+    while (at <= value.size()) {
+        const auto end = value.find('\n', at);
+        std::string line = value.substr(at, end == std::string::npos ? std::string::npos : end - at);
+        while (line.size() > columns) { lines.push_back(line.substr(0, columns)); line = "  " + line.substr(columns); }
+        lines.push_back(line);
+        if (end == std::string::npos) break;
+        at = end + 1;
+    }
+    const float lineH = size * 1.45f, boxH = static_cast<float>(lines.size()) * lineH + 14;
+    DrawRectangleRounded({x, y, width, boxH}, .04f, 4, Color{9, 14, 22, 255});
+    DrawRectangleRoundedLinesEx({x, y, width, boxH}, .04f, 4, 1, Border);
+    float ly = y + 7;
+    for (const auto& line : lines) {
+        const auto note = line.find("<-");
+        const std::string head = line.substr(0, note);
+        text(head, x + 8, ly, size, Teal, Face::Mono);
+        if (note != std::string::npos) text(line.substr(note), x + 8 + textWidth(head, size, Face::Mono), ly, size, Gold, Face::Mono);
+        ly += lineH;
+    }
+    return y + boxH;
 }
 std::string firstLine(const std::string& value, float width, float size) {
     const auto lines = wrap(plain(value.substr(0, value.find('\n'))), width, size);
@@ -408,7 +501,8 @@ int runFrontend(int initialRoom, const std::string& attachmentDiagnostic, bool u
         last = snap;
         scene.update(GetFrameTime(), snap);
         const int room = game.room();
-        const auto& lesson = lessons[room];
+        const auto values = liveValues(game);
+        const Lesson lesson = live(lessons[room], values);
         const auto outcome = game.outcome();
         const auto teaching = game.teaching();
         const bool patched = teaching.ammoPatched || teaching.damagePatched || teaching.vaultPatched;
@@ -623,6 +717,7 @@ int runFrontend(int initialRoom, const std::string& attachmentDiagnostic, bool u
                         text(tag, body.x + 50, cy + 4, 11, tagColor, Face::Bold);
                         cy = rich(current.text, body.x + 14, cy + 30, w - 28, font, Ink) + 6;
                         if (!current.why.empty()) cy = rich(current.why, body.x + 14, cy, w - 28, font - 2, Muted) + 4;
+                        if (!current.show.empty()) cy = showPanel(current.show, body.x + 14, cy + 2, w - 28, font - 2) + 8;
                         if (!current.see.empty()) {
                             text("YOU SHOULD SEE", body.x + 14, cy + 2, 10, Gold, Face::Bold);
                             cy = rich(current.see, body.x + 14, cy + 18, w - 28, font - 2, Gold) + 6;
@@ -669,7 +764,7 @@ int runFrontend(int initialRoom, const std::string& attachmentDiagnostic, bool u
                     ty += 6;
                     if (ui.button({body.x, ty, w, 28}, recipeOpen ? "Hide: Find ROOKIE again" : "Lost your ROOKIE class? Find ROOKIE again", 12, recipeOpen)) recipeOpen = !recipeOpen;
                     ty += 36;
-                    if (recipeOpen) ty = rich(FindRookieRecipe(), body.x, ty, w, font - 1, Muted) + 10;
+                    if (recipeOpen) ty = rich(live(FindRookieRecipe(), values), body.x, ty, w, font - 1, Muted) + 10;
                 }
                 ty = paragraph("A ReClass debugger pause freezes this whole window. Keep GUIDE.html open for those steps.", body.x, ty + 6, w, 12, Muted) + 10;
                 if (ui.button({body.x, ty, 130, 26}, "Copy steps", 12, false, "Copy this room's steps as plain text")) { const auto copy = instructions(lesson); SetClipboardText(copy.c_str()); notify("Steps copied."); }
@@ -712,13 +807,13 @@ int runFrontend(int initialRoom, const std::string& attachmentDiagnostic, bool u
                     fy = paragraph((field.type == "float32" ? copy : field.value) + "   " + field.type, fieldsBody.x, fy + 3, fieldsBody.width - 12, font, field.valid ? Gold : Red, Face::Mono);
                     if (progress.hex && !field.rawHex.empty()) fy = paragraph("Raw: " + field.rawHex, fieldsBody.x, fy + 3, fieldsBody.width - 12, 12, Blue, Face::Mono);
                     if (progress.addresses) {
-                        const std::string address = hexAddress(field.address);
+                        const std::string& address = field.address;
                         const float addressTop = fy + 3;
                         fy = paragraph(address, fieldsBody.x, addressTop, fieldsBody.width - 62, 13, Teal, Face::Mono);
                         if (ui.button({fieldsBody.x + fieldsBody.width - 54, addressTop, 44, 20}, "Copy", 11, false, "Copy current absolute field address")) { SetClipboardText(address.c_str()); notify("Copied address for " + field.label); }
                         fy = paragraph(field.path, fieldsBody.x, fy + 2, fieldsBody.width - 12, 12, Muted);
                         if (field.label == "Module root")
-                            fy = paragraph("Module: " + moduleReference(field.address), fieldsBody.x, fy + 3, fieldsBody.width - 12, 12, Blue);
+                            fy = paragraph("Module: " + moduleReference(static_cast<std::uintptr_t>(std::strtoull(field.address.c_str(), nullptr, 16))), fieldsBody.x, fy + 3, fieldsBody.width - 12, 12, Blue);
                     }
                     fy += 8;
                     DrawLineEx({fieldsBody.x, fy}, {fieldsBody.x + fieldsBody.width - 12, fy}, 1, Border); fy += 10;
@@ -729,16 +824,16 @@ int runFrontend(int initialRoom, const std::string& attachmentDiagnostic, bool u
                 }
                 if (progress.addresses) {
                     text("TEACHING SITES", fieldsBody.x, fy, 12, Teal, Face::Bold); fy += 22;
-                    const std::vector<std::pair<std::string, std::uintptr_t>> sites{{"Module root pointer", teaching.worldRoot}, {"Ammo patch site", teaching.ammoSite}, {"Damage patch site", teaching.damageSite}, {"Vault entry", teaching.vaultEntry}, {"Vault endpoint", teaching.vaultEndpoint}, {"Stable signature", teaching.signature}, {"Badge compare", teaching.badgeSite}};
-                    for (const auto& site : sites) {
-                        fy = paragraph(site.first, fieldsBody.x, fy, fieldsBody.width - 12, 12, Muted);
-                        const auto address = hexAddress(site.second);
+                    // Label, address and module offset, kept as text only.
+                    const auto site = [](const char* label, std::uintptr_t address) { return std::array<std::string, 3>{label, hexAddress(address), moduleReference(address)}; };
+                    const std::vector<std::array<std::string, 3>> sites{site("Module root pointer", teaching.worldRoot), site("Ammo patch site", teaching.ammoSite), site("Damage patch site", teaching.damageSite), site("Vault entry", teaching.vaultEntry), site("Vault endpoint", teaching.vaultEndpoint), site("Stable signature", teaching.signature), site("Badge compare", teaching.badgeSite)};
+                    for (const auto& [label, address, relative] : sites) {
+                        fy = paragraph(label, fieldsBody.x, fy, fieldsBody.width - 12, 12, Muted);
                         const float addressTop = fy + 3;
                         fy = paragraph(address, fieldsBody.x, addressTop, fieldsBody.width - 62, 13, Teal, Face::Mono);
-                        if (ui.button({fieldsBody.x + fieldsBody.width - 54, addressTop, 44, 20}, "Copy", 11, false, "Copy current teaching-site address")) { SetClipboardText(address.c_str()); notify("Copied " + site.first); }
-                        const auto relative = moduleReference(site.second);
+                        if (ui.button({fieldsBody.x + fieldsBody.width - 54, addressTop, 44, 20}, "Copy", 11, false, "Copy current teaching-site address")) { SetClipboardText(address.c_str()); notify("Copied " + label); }
                         fy = paragraph("Module: " + relative, fieldsBody.x, fy + 3, fieldsBody.width - 12, 12, Blue);
-                        if (ui.button({fieldsBody.x, fy + 3, fieldsBody.width - 12, 22}, "Copy module + offset", 11, false, "Copy " + relative, relative != "module offset unavailable")) { SetClipboardText(relative.c_str()); notify("Copied module offset for " + site.first); }
+                        if (ui.button({fieldsBody.x, fy + 3, fieldsBody.width - 12, 22}, "Copy module + offset", 11, false, "Copy " + relative, relative != "module offset unavailable")) { SetClipboardText(relative.c_str()); notify("Copied module offset for " + label); }
                         fy += 38;
                     }
                     if (!teaching.signaturePattern.empty()) fy = paragraph("Pattern: " + teaching.signaturePattern, fieldsBody.x, fy, fieldsBody.width - 12, 12, Blue) + 10;

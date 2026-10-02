@@ -4,7 +4,9 @@
 
 namespace breakout {
 // One instruction. `where` is "game" or "reclass"; text marks UI labels with
-// backticks. `check` names an event the game can observe (empty = manual).
+// backticks. Any text may hold {{live.NAME}} tokens that the game replaces
+// with current addresses and values when it draws the step. `check` names an
+// event the game can observe (empty = manual).
 // `loop` marks the end of a round the player may need to repeat.
 struct TutorialStep {
     std::string where;
@@ -14,6 +16,8 @@ struct TutorialStep {
     int loop = 0;
     // One line on why this step works, and what the player should see afterwards.
     std::string why, see;
+    // Optional monospace mock of the ReClass rows or results to look for.
+    std::string show;
 };
 // A longer, plain-language explanation shown in the Explain window. Text uses
 // blank lines between blocks; a block of "- " lines is a bullet list, a block

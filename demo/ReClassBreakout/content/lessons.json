@@ -352,7 +352,7 @@
           "where": "reclass",
           "text": "In your ROOKIE class, right-click row 0040 → `Change Type` → `Pointer`, then expand it with its arrow.",
           "why": "Row 0040 holds an address, not a value: the inventory is a separate object.",
-          "see": "A nested class: ROOKIE's inventory."
+          "see": "Under row 0040 a nested class appears with an automatic name like N00000067. There's no \"inventory\" label in memory: that class is ROOKIE's inventory, at `{{live.inventory}}`. Its first rows point into <HEAP>."
         },
         {
           "where": "reclass",
@@ -419,53 +419,65 @@
       "id": 6,
       "title": "Static Root",
       "chapter": "Pointers",
-      "goal": "The relay's control block moves to a new address every time it reboots. Power the relay door in 3 different control blocks by building a pointer path that always finds the current one.",
+      "goal": "The relay's control block moves to a new address every time it reboots. Power the relay door in 3 different control blocks by building a pointer path that always finds the current one.\n\nThe steps show the real addresses from this run, so you can compare them with ReClass as you go.",
       "steps": [
         {
           "where": "reclass",
-          "text": "In your ROOKIE class, right-click the class header → `Copy Address`.",
-          "why": "Anything in memory that holds this address is a pointer to ROOKIE."
+          "text": "First you need ROOKIE's address. Any pointer to ROOKIE stores exactly this number. Right now ROOKIE lives at `{{live.rookie}}`.\n\nYou can simply type it in the next step. To copy it instead, right-click row 0000 of your ROOKIE class → `Copy Address` (copying is greyed out on the class header itself).",
+          "why": "Anything in memory that holds this number is a pointer to ROOKIE. Next you'll find out who points at ROOKIE.",
+          "show": "{{live.rookie}}  Class N000000xx\n  <- your ROOKIE class\n0000 {{live.rookie.row}}  <- same address"
         },
         {
           "where": "reclass",
-          "text": "Scanner: Value Type `Long (8 Bytes)`, tick `Is Hex`, paste the address as Value, `First Scan`.",
-          "see": "Only a few results."
+          "text": "In the Scanner, click `First Scan` once. That clears the last room's scan: until you do, the Value Type box stays greyed out.\n\nThen set Value Type `Long (8 Bytes)` (a pointer is 8 bytes), tick `Is Hex`, type `{{live.rookie}}` into Value and click `First Scan`.",
+          "why": "The relay's control block keeps a pointer to ROOKIE in its first 8 bytes, so it shows up in these results. The others are other places that point at ROOKIE too.",
+          "show": "Value: {{live.rookie}}   [x] Is Hex\nValue Type: Long (8 Bytes)\n\nAddress\n{{live.world.row}}  <- the control block\n(other rows)        <- ignore these",
+          "see": "Only a few results, usually 2–4: the control block, the game's own list of actors, and sometimes a copy on the stack (an address starting with lots of zeros). The Value column shows ROOKIE's address in decimal; that's normal. If you've already rebooted the relay, old control blocks show up too: the current one is always `{{live.world.row}}`."
         },
         {
           "where": "reclass",
-          "text": "For each result: right-click → `Create class at address` and change its row 0018 to `Int32`. The control block is the one reading 6 (this room's number). Copy its address.",
-          "see": "One class reads 6 at row 0018."
+          "text": "Find the result whose address is `{{live.world.row}}` (drag the Address column wider if it's cut off). That's the relay's control block. Right-click it → `Create class at address`.\n\nIn the new class, right-click row 0018 → `Change Type` → `Int32`.",
+          "why": "Row 0000 of the block is the pointer you scanned for: its comment shows ROOKIE's address. Row 0018 holds the room number.",
+          "show": "{{live.world}}  Class N000000xx\n0000 {{live.world.row}}\n     -> <HEAP>{{live.rookie}}  <- points at ROOKIE\n0018 Int32 = 6   <- room number\n0020 00 00 00 00 ...  <- relay power (step 6)",
+          "see": "Row 0018 reads 6, this room's number: you have the control block. Keep this class; you'll re-point it in step 5."
         },
         {
           "where": "reclass",
-          "text": "Scanner again: `Long (8 Bytes)`, `Is Hex`, Value = the control block's address, `First Scan`.",
-          "see": "One result is green: it lives inside the game's executable. Hover it to see <ReClassBreakout>+0x… ."
+          "text": "The control block's address changes on every reboot, so you need something that always points at it. Search for pointers to the block: in the Scanner, click `First Scan` once to clear, keep `Long (8 Bytes)` and `Is Hex`, type `{{live.world}}` into Value and click `First Scan`.\n\nDon't create a class at the green result. That slot only holds the pointer; you'll use its location in the next step.",
+          "why": "Green means the slot is inside the game's executable: a global variable. It's always the same distance from the start of the .exe, even after a reboot or a restart.",
+          "show": "Address\n{{live.root.row}}  <- green: inside the .exe\n(other rows)        <- stack/heap copies\n\nHover the green address:\n<{{live.module}}>+{{live.root.offset}}",
+          "see": "A few results. One is green, `{{live.root.row}}`, and hovering it shows `<{{live.module}}>+{{live.root.offset}}`. That offset is what you need."
         },
         {
           "where": "reclass",
-          "text": "Set the control-block class address to `[<ReClassBreakout>+0xOFFSET]` with that offset (on Windows: `<ReClassBreakout.exe>`).",
-          "why": "Square brackets mean \"read the pointer stored here\". The executable's address is stable, so this always leads to the current block."
+          "text": "Go back to your control-block class (the one with 6 at row 0018). At the top of the class, click its address `{{live.world}}` to edit it, replace it with `{{live.root.expr}}` and press Enter.",
+          "why": "`<{{live.module}}>` means \"where the .exe starts\", `+{{live.root.offset}}` moves to the green slot, and the square brackets mean \"read the pointer stored there\". ReClass works this out again every time it redraws.",
+          "show": "Before:  {{live.world}}  Class N000000xx\nAfter:   {{live.root.expr}}\n\n0018 Int32 = 6   <- unchanged",
+          "see": "The rows don't change: row 0018 still reads 6. What changed is how ReClass finds the block: through the green pointer instead of a fixed number."
         },
         {
           "where": "reclass",
-          "text": "In that class, change row 0020 to `Float` (relay power) and set it to `100`.",
+          "text": "In that class, right-click row 0020 → `Change Type` → `Float`. It reads 0: that's relay power. Double-click the 0, type `100` and press Enter.",
           "check": "relay:1",
+          "show": "0020 Float = 0     <- before\n0020 Float = 100   <- after",
           "see": "The relay door opens: LINKS 1 / 3."
         },
         {
           "where": "game",
-          "text": "Press E at the relay console to reboot it.",
+          "text": "Walk to the relay console and press E to reboot it.",
           "check": "action:relay",
+          "why": "Rebooting builds a brand-new control block at a different address, with relay power back at 0.",
           "see": "The door shuts: the control block moved."
         },
         {
           "where": "reclass",
-          "text": "Your class followed the green pointer to the new block. Set relay power to `100` again, reboot, and repeat once more.",
+          "text": "Look at your class. Its header still says `{{live.root.expr}}`, but the row addresses changed: the block now lives at `{{live.world}}`. ReClass followed the green pointer for you.\n\nSet row 0020 to `100` again, reboot at the console, and do it once more.",
           "check": "relay:3",
+          "show": "{{live.root.expr}}  <- unchanged\n0000 {{live.world.row}}  <- new address\n0018 Int32 = 6\n0020 Float = 0     <- set to 100",
           "see": "LINKS 3 / 3."
         }
       ],
-      "learned": "A green pointer inside the module survives reallocations and restarts. A class at [<module>+offset] always finds the current object.",
+      "learned": "A pointer stored inside the executable (shown green in the Scanner) survives reallocations and restarts. A class at [<module>+offset] always finds the current object.",
       "explain": [
         {
           "title": "The big idea",
@@ -473,11 +485,11 @@
         },
         {
           "title": "Pointer scanning backwards",
-          "text": "Scanning for ROOKIE's address as a `Long (8 Bytes)` finds every place that stores a pointer to ROOKIE. One of them is inside the control block (row 0x18 reads 6, the room number). Scan again for the control block's address, and the result shown in green lives inside the executable itself: a static pointer."
+          "text": "Scanning for ROOKIE's address as a `Long (8 Bytes)` finds every place that stores a pointer to ROOKIE. One of them is the start of the relay's control block (its row 0x18 reads 6, the room number). Scan again for the control block's address, and the result shown in green lives inside the executable itself: a static pointer.\n\nThis run's chain:\n\n```\n<{{live.module}}>+{{live.root.offset}}  (green slot)\n  -> control block  {{live.world}}\n       -> ROOKIE    {{live.rookie}}\n```"
         },
         {
           "title": "Module + offset",
-          "text": "ASLR (address space layout randomization) loads the executable at a different base address every run, but the offset inside it never changes. `<ReClassBreakout>+0x…` means \"the executable's base, plus this offset\", which is the same in every run.\n\nIn a class address, square brackets mean \"read the pointer stored here\". So `[<ReClassBreakout>+0x…]` says: take the executable's current base, add the offset, read the pointer stored there, and show that object.\n\n> Static pointer → current object, recomputed every time. That's why your class followed the relay to each new control block."
+          "text": "ASLR (address space layout randomization) loads the executable at a different base address every run, but the offset inside it never changes. `<ReClassBreakout.exe>+0x…` means \"the executable's base, plus this offset\", which is the same in every run.\n\nIn a class address, square brackets mean \"read the pointer stored here\". So `[<ReClassBreakout.exe>+0x…]` says: take the executable's current base, add the offset, read the pointer stored there, and show that object.\n\n> Static pointer → current object, recomputed every time. That's why your class followed the relay to each new control block."
         },
         {
           "title": "This also proves Room 3's guess",
@@ -493,49 +505,56 @@
       "id": 7,
       "title": "Turret Nest",
       "chapter": "Code",
-      "goal": "Find the instruction that subtracts your health, replace it with NOPs so the turret can't hurt you, then put the original code back.",
+      "goal": "Find the instruction that subtracts your health, replace it with NOPs so the turret can't hurt you, then put the original code back.\n\nThe steps show this run's real addresses, so you can match them against ReClass's windows.",
       "steps": [
         {
           "where": "reclass",
-          "text": "In your ROOKIE class, change row 0000 to `Int32` (it reads health, 100). Right-click it → `Find out what writes to this address...` and accept the debugger prompt.",
-          "why": "ReClass will list every instruction that changes your health.",
-          "see": "An empty watch window."
+          "text": "In your ROOKIE class, right-click row 0000 → `Change Type` → `Int32`. It reads 100: your health.\n\nRight-click that row again → `Find out what writes to this address...`. ReClass asks to attach its debugger: accept.",
+          "why": "This sets a hardware watchpoint: the CPU itself reports every instruction that writes these 4 bytes, and ReClass lists them.",
+          "show": "Find writes to data {{live.rookie.hex}}\n\nCount  Instruction address  ...\n(empty)   <- nothing has hit you yet",
+          "see": "The Find what writes window opens with a pulsing \"Waiting for the first write…\" in the middle. Leave it open."
         },
         {
           "where": "game",
-          "text": "Step into the red zone until the turret hits you once, then step out.",
+          "text": "Step into the red zone until the turret hits you once (HP 90), then step out.",
           "check": "hit",
-          "see": "A row appears in the watch window."
+          "why": "The CPU reports a write just after the instruction finished, so ReClass can only work out where it ended. It lists every instruction that could end right there, which here is two.",
+          "show": "Instruction address   Bytes     Instruction\n{{live.damage.decoy.hex}}  28 0A     sub [rdx],cl\n  <- Unlikely: ignore\n{{live.damage.site.hex}}  83 28 0A  sub dword [rax],0xA\n  <- the real one",
+          "see": "Two rows with Count 1. The top one is marked \"Unlikely: its memory operand doesn't touch the watched data\"."
         },
         {
           "where": "reclass",
-          "text": "Select the row and click `Confirm next execution`.",
-          "why": "The first row can point just past the real instruction; confirming catches the exact one."
+          "text": "Click the row at `{{live.damage.site.hex}}`: `sub dword [rax],0xA`, which means \"subtract 10 from the number at the address in rax\". rax holds ROOKIE's address, so that's your health.\n\nThen click `Confirm next execution`.",
+          "why": "Confirming puts a hardware breakpoint on that exact address and waits for the CPU to run it. If you pick the wrong row by mistake, nothing breaks: it just never becomes CONFIRMED.",
+          "see": "The NEXT bar says it is waiting for that instruction to run again."
         },
         {
           "where": "game",
           "text": "Take one more hit.",
           "check": "hit",
-          "see": "The row turns green: confirmed."
+          "see": "The `sub dword [rax],0xA` row gets a green CONFIRMED badge, and the NEXT bar points you to Inspect / edit."
         },
         {
           "where": "reclass",
-          "text": "Click `Inspect / edit`, then `NOP selection`, `Preview`, `Apply`.",
+          "text": "With the CONFIRMED row selected, click `Inspect / edit`. In the editor click `NOP selection`, then `Preview`, then `Apply`. The step bar at the top of the editor follows along: Inspect, Edit, Preview, Apply, Restore.",
           "check": "patched",
-          "why": "NOP means \"do nothing\": the instruction that subtracts 10 health is replaced.",
-          "see": "Preview shows sub dword [rax], 0xA turning into NOPs."
+          "why": "NOP means \"do nothing\". The 3 bytes of the subtraction become 3 one-byte NOPs, so a hit no longer changes health.",
+          "show": "Change preview\nORIGINAL     83 28 0A  <- crossed out\nREPLACEMENT  90 90 90\nBEFORE  sub dword [rax],0xA\nAFTER   nop / nop / nop\n\nAfter Apply:\nPatch applied and verified.",
+          "see": "The Change preview shows 83 28 0A crossed out above 90 90 90. After Apply, a red PATCH ACTIVE badge appears at the top of the editor."
         },
         {
           "where": "game",
-          "text": "Take 3 hits in the zone.",
+          "text": "Stand in the red zone and take 3 hits.",
           "check": "primary",
-          "see": "Health doesn't move."
+          "see": "HP doesn't move: the turret still fires, but the subtraction is gone."
         },
         {
           "where": "reclass",
-          "text": "Click `Restore original`.",
+          "text": "In the editor click `Restore original`.",
           "check": "restored",
-          "see": "The editor shows the original instruction again."
+          "why": "A code patch stays until you restore it, even if you restart the room.",
+          "show": "Original bytes restored and verified.\n\nThe Assembly pane may still list nop  <- only the editor's text",
+          "see": "The status bar shows a green check, and the PATCH ACTIVE badge disappears."
         },
         {
           "where": "game",
@@ -545,7 +564,7 @@
         }
       ],
       "learned": "Editing code changes every future execution, not just one value. Always restore what you patch.",
-      "restore": "Restore original (or Patches → Restore all) before leaving. Restart room never restores code.",
+      "restore": "`Restore original`, or `Debugger → Saved and active patches…` → `Restore all`, before leaving. Restart room never restores code.",
       "explain": [
         {
           "title": "The big idea",
@@ -557,11 +576,11 @@
         },
         {
           "title": "Why confirm",
-          "text": "The CPU reports the write just after the instruction has finished, so the first row can point at the following instruction. `Confirm next execution` stops on the actual instruction the next time it runs, and the row turns green with its exact boundaries."
+          "text": "The CPU reports a write just after the instruction has finished, so ReClass knows where it ended but not where it started. It lists every instruction that could end right there. For the bytes `83 28 0A` that's two:\n\n```\n{{live.damage.site.hex}}  83 28 0A  sub dword [rax],0xA   real\n{{live.damage.decoy.hex}}  28 0A     sub [rdx],cl          last 2 bytes only\n```\n\n`Confirm next execution` puts a hardware breakpoint on the row you pick. Only a real instruction start ever triggers it, so the right row becomes CONFIRMED and a wrong pick simply stays a candidate."
         },
         {
           "title": "NOP",
-          "text": "`sub dword [rax], 0xA` means \"subtract 10 from the number at the address in rax\": your health. NOP is an instruction that does nothing. `NOP selection` replaces those bytes with NOPs, so the subtraction never happens.\n\n> A code patch changes every future execution, for everything that runs that code. Data edits change one value once."
+          "text": "`sub dword [rax],0xA` means \"subtract 10 from the number at the address in rax\": your health. NOP is an instruction that does nothing. `NOP selection` replaces those bytes with NOPs, so the subtraction never happens.\n\n> A code patch changes every future execution, for everything that runs that code. Data edits change one value once."
         },
         {
           "title": "Always restore",
@@ -581,30 +600,35 @@
       "steps": [
         {
           "where": "reclass",
-          "text": "In your ROOKIE class, change row 0000 to `Int32` if it isn't already. The 4-byte row after it, at 0004, is ammo: right-click it → `Find out what writes to this address...`."
+          "text": "In your ROOKIE class, row 0000 should already be `Int32` (health, 100) from Turret Nest. The 4-byte row right after it, at 0004, is ammo.\n\nRight-click row 0004 → `Find out what writes to this address...`.",
+          "why": "Ammo is ROOKIE + 4, right after health. This time you watch ammo.",
+          "show": "0000 Int32 = 100     <- health\n0004 0C 00 00 00     <- ammo: 12 = 0x0C\n                        (watch this one)"
         },
         {
           "where": "game",
           "text": "Shoot once.",
           "check": "fired",
-          "see": "A row appears in the watch window."
+          "why": "Only one instruction can end where this write was reported, so there's a single row this time.",
+          "show": "Instruction address   Bytes  Instruction\n{{live.ammo.site.hex}}  FF 08  dec dword [rax]\n  <- the only row",
+          "see": "One row appears."
         },
         {
           "where": "reclass",
-          "text": "Select the row → `Confirm next execution`."
+          "text": "Select the `dec dword [rax]` row (\"subtract 1 from the number at rax\": ammo) → `Confirm next execution`."
         },
         {
           "where": "game",
           "text": "Shoot once more.",
           "check": "fired",
-          "see": "The row turns green."
+          "see": "The row gets a green CONFIRMED badge."
         },
         {
           "where": "reclass",
-          "text": "Click `Inspect / edit`. In the Assembly pane change `dec dword [rax]` to `inc dword [rax]`, then `Preview` and `Apply`.",
+          "text": "Click `Inspect / edit`. In the Assembly pane change `dec dword [rax]` to `inc dword [rax]`, then click `Preview` and `Apply`.",
           "check": "patched",
-          "why": "dec subtracts 1, inc adds 1. Both are 2 bytes, so the new instruction fits exactly.",
-          "see": "Preview: FF 08 becomes FF 00."
+          "why": "dec subtracts 1, inc adds 1. Both are 2 bytes, so the new instruction fits exactly in place of the old one.",
+          "show": "Assembly: inc dword [rax]\n\nChange preview\nORIGINAL     FF 08\nREPLACEMENT  FF 00  <- one byte changes",
+          "see": "Patch applied and verified."
         },
         {
           "where": "game",
@@ -615,7 +639,8 @@
         {
           "where": "reclass",
           "text": "Click `Restore original`.",
-          "check": "restored"
+          "check": "restored",
+          "see": "Original bytes restored and verified."
         },
         {
           "where": "game",
@@ -625,7 +650,7 @@
         }
       ],
       "learned": "Assembly and hex are two views of the same bytes. A same-size replacement can be patched in place.",
-      "restore": "Restore original (or Patches → Restore all) before leaving.",
+      "restore": "`Restore original`, or `Debugger → Saved and active patches…` → `Restore all`, before leaving. Restart room never restores code.",
       "explain": [
         {
           "title": "The big idea",
@@ -653,34 +678,46 @@
       "steps": [
         {
           "where": "reclass",
-          "text": "In your ROOKIE class, change row 0028 to `UTF8 Text`, then right-click it → `Find out what accesses this address...`.",
-          "see": "It reads ROOKIE. Rows appear straight away: the game's own drawing reads your name every frame."
+          "text": "In your ROOKIE class, right-click row 0028 → `Change Type` → `UTF8 / ASCII Text`. It reads ROOKIE: your callsign.\n\nRight-click it → `Find out what accesses this address...` (accesses, not writes: you want whoever reads your name). Accept the debugger prompt if asked.",
+          "show": "0028 ... 'ROOKIE'   <- your callsign, 8 bytes",
+          "see": "Rows appear straight away and their counts climb every frame: that's the game drawing your name. Ignore those."
         },
         {
           "where": "game",
           "text": "Stand on the SCAN PAD in front of the gate.",
           "check": "zone:scan",
+          "why": "The gate's scanner reads your name only while you stand on the pad.",
           "see": "SCANNING... above the pad."
         },
         {
           "where": "reclass",
-          "text": "Find the row whose count only rises while you stand on the pad (step off and back on to compare). Select it → `Confirm next execution`, then `Inspect / edit`.",
-          "see": "Instructions including mov rcx, 0x5245454E49474E45."
+          "text": "Find the two rows whose counts rise only while you're on the pad (step off and back on to compare). Select the one at `{{live.badge.read.hex}}`, `mov rdx,[rax+0x28]`, and click `Confirm next execution` while you're on the pad.",
+          "why": "rax holds ROOKIE's address, so [rax+0x28] is your callsign: this copies all 8 letters into rdx. The other row is the same bytes read starting one byte late; confirming it would never become CONFIRMED.",
+          "show": "Instruction address   Bytes        Instruction\n{{live.badge.decoy.hex}}  8B 50 28     mov edx,[rax+0x28]\n  <- the tail of the real one\n{{live.badge.read.hex}}  48 8B 50 28  mov rdx,[rax+0x28]\n  <- the real one",
+          "see": "The real row gets a green CONFIRMED badge."
         },
         {
           "where": "reclass",
-          "text": "Write that number's bytes backwards: 45 4E 47 49 4E 45 45 52. Read them as ASCII letters.",
-          "why": "x64 stores numbers lowest byte first, so text hidden in a number reads backwards.",
-          "see": "E N G I N E E R. The code also checks [rax+0x20] (clearance) equals 2."
+          "text": "Click `Inspect / edit`. The editor loads just this one instruction. To see what the scanner does next, set `Selected bytes` to `31` and click `Load selection`.",
+          "why": "31 bytes covers the read plus the three compare-and-jump pairs after it.",
+          "show": "Original selection: 8 instructions, 31 bytes\nmov rdx,[rax+0x28]      <- your name\nmov rcx,0x5245454E49474E45\n                        <- the secret\ncmp rdx,rcx\njne ...                 <- wrong name: reject\ncmp byte [rax+0x30],0\njne ...                 <- name must end here\ncmp dword [rax+0x20],2\njne ...                 <- clearance must be 2",
+          "see": "The Original selection card lists all 8 instructions, each with a plain-English line, including mov rcx,0x5245454E49474E45."
         },
         {
           "where": "reclass",
-          "text": "Click `Stop` in the watch window. Double-click your callsign and enter `ENGINEER`.",
+          "text": "The secret is the number 0x5245454E49474E45. x64 stores numbers lowest byte first, so in memory it's 45 4E 47 49 4E 45 45 52. Read those bytes as ASCII letters.",
+          "why": "When a number in code is made of bytes between 0x41 and 0x5A (A to Z), it's often text.",
+          "show": "45 4E 47 49 4E 45 45 52\n E  N  G  I  N  E  E  R",
+          "see": "ENGINEER: exactly 8 letters, and the byte after it (+0x30) must be 0. Clearance (+0x20) must be 2."
+        },
+        {
+          "where": "reclass",
+          "text": "Click `Stop` in the watch window. Double-click your callsign (row 0028), type `ENGINEER` and press Enter.",
           "check": "write:callsign"
         },
         {
           "where": "reclass",
-          "text": "Change row 0020 to `UInt32` and set it to `2`.",
+          "text": "Row 0020 is clearance (`UInt32` since Blast Door; change it if it isn't). Set it to `2`.",
           "check": "write:clearance",
           "see": "Both gate lights turn green."
         },
@@ -699,11 +736,11 @@
         },
         {
           "title": "Reads, not writes",
-          "text": "`Find out what accesses this address...` lists every instruction that reads or writes the callsign. Lots of code reads it (the game draws your name every frame), so you look for the row whose count only rises while you stand on the scan pad: that's the gate's scanner."
+          "text": "`Find out what accesses this address...` lists every instruction that reads or writes the callsign. Lots of code reads it (the game draws your name every frame), so you look for the rows whose counts only rise while you stand on the scan pad: that's the gate's scanner.\n\nThere are two of them, the real `mov rdx,[rax+0x28]` and the same bytes decoded one byte late. Confirming finds the real one."
         },
         {
           "title": "Reading text hidden in a number",
-          "text": "The scanner compares your name against `0x5245454E49474E45`. Those 8 bytes are letters, but x64 stores numbers lowest byte first (little-endian), so in memory they're 45 4E 47 49 4E 45 45 52. As ASCII that's E N G I N E E R.\n\n> When a number in code looks like 4x/5x/6x/7x bytes, try reading it backwards as text."
+          "text": "The scanner compares your name against `0x5245454E49474E45`. Those 8 bytes are letters, but x64 stores numbers lowest byte first (little-endian), so in memory they're 45 4E 47 49 4E 45 45 52. As ASCII that's E N G I N E E R.\n\n> When a number in code is made of bytes between 0x41 and 0x7A, try reading it backwards as text."
         },
         {
           "title": "The rest of the check",
@@ -723,25 +760,32 @@
       "steps": [
         {
           "where": "reclass",
-          "text": "Right-click your health row (0000, `Int32`) → `Find out what writes to this address...`."
+          "text": "Right-click your health row (0000, `Int32`) → `Find out what writes to this address...`. Accept the debugger prompt if asked.",
+          "why": "Same start as Turret Nest: find the code that subtracts health."
         },
         {
           "where": "game",
           "text": "Stand on the PRESS plate until it hits you, then step off.",
-          "check": "hit"
+          "check": "hit",
+          "why": "The press hits the sentinel first (after 0.8 s) and you second (after 1.6 s). This watch is on your health, so it only sees your hit.",
+          "show": "Instruction address   Bytes     Instruction\n{{live.damage.decoy.hex}}  28 0A     sub [rdx],cl\n  <- Unlikely: ignore\n{{live.damage.site.hex}}  83 28 0A  sub dword [rax],0xA\n  <- the real one",
+          "see": "The same two rows as in Turret Nest: the press uses the same damage routine."
         },
         {
           "where": "reclass",
-          "text": "Select the row whose count rose with the hit → `Confirm next execution`."
+          "text": "Select `{{live.damage.site.hex}}`, `sub dword [rax],0xA` → `Confirm next execution`."
         },
         {
           "where": "game",
           "text": "Step on the plate again until it hits you.",
-          "check": "hit"
+          "check": "hit",
+          "see": "The row gets a green CONFIRMED badge."
         },
         {
           "where": "reclass",
-          "text": "Click `Find accessed addresses`. In the new window set Condition `mem32(rax + 0x1C) == 1` (faction 1 is the player), tick `Pause on match`, click `Apply condition`. Click `Stop` in the first window."
+          "text": "Click `Find accessed addresses`. A second window opens that watches the instruction itself, so it sees every hit: yours and the sentinel's.\n\nIn that new window type the Condition `mem32(rax + 0x1C) == 1`, tick `Pause on match` and click `Apply condition`. Then click `Stop` in the first window.",
+          "why": "rax holds the address of whoever is being hit, and +0x1C is their faction: 1 = player, 2 = enemy. mem32(...) reads those 4 bytes, so the condition only matches your hits.",
+          "show": "Find addresses accessed by instruction\n{{live.damage.site.hex}}\n\nCondition: mem32(rax + 0x1C) == 1\n[x] Pause on match"
         },
         {
           "where": "game",
@@ -750,11 +794,14 @@
         },
         {
           "where": "reclass",
-          "text": "Select the captured row and read r9 in the register details, for example 0x1A2B. Convert it to decimal (0x1A2B = 6699). Click `Stop`, then `Resume (F5)`."
+          "text": "In the second window select the captured row. Open the Registers tab below it and find the R9 tile (the Raw tab has the same values as text). Then click `Stop`, then `Resume (F5)` so the game runs again.",
+          "why": "Functions receive their inputs in registers. The damage routine gets a 4-digit code in r9 with every hit; only your hits carry the real one. Registers are shown in hex: Windows Calculator in Programmer mode converts them.",
+          "show": "RAX  0x{{live.rookie.row}}  <- you\n...\nR9   {{live.override.r9}}\n      <- the override code\n\nIn decimal: {{live.override}}",
+          "see": "R9 in the details. The steps show the same number so you can check it: {{live.override}} in decimal."
         },
         {
           "where": "reclass",
-          "text": "Set ROOKIE's clearance (offset 0020, `UInt32`) to that decimal number.",
+          "text": "Set ROOKIE's clearance (row 0020, `UInt32`) to the decimal number, `{{live.override}}`.",
           "check": "write:clearance"
         },
         {
@@ -775,7 +822,7 @@
         },
         {
           "title": "Registers carry data",
-          "text": "Functions receive their inputs in CPU registers. Here the routine is given a 4-digit code in r9 along with each hit, and only your hits carry the real one. The register view shows hex, so 0x1A2B becomes 6699 in decimal."
+          "text": "Functions receive their inputs in CPU registers. Here the routine is given a 4-digit code in r9 along with each hit, and only your hits carry the real one. The register view shows hex; this run's code is `{{live.override.r9}}`, which is {{live.override}} in decimal. It changes every time you enter the room."
         },
         {
           "title": "Why a patch here would hit both",
@@ -796,39 +843,47 @@
         {
           "where": "game",
           "text": "Shoot the training wall once.",
-          "check": "fired"
+          "check": "fired",
+          "show": "Instruction address   Bytes  Instruction\n{{live.ammo.site.hex}}  FF 08  dec dword [rax]\n  <- the only row"
         },
         {
           "where": "reclass",
-          "text": "Select the row whose count rose with the shot → `Confirm next execution`."
+          "text": "Select the `dec dword [rax]` row → `Confirm next execution`."
         },
         {
           "where": "game",
           "text": "Shoot once more.",
-          "check": "fired"
+          "check": "fired",
+          "see": "The row gets a green CONFIRMED badge."
         },
         {
           "where": "reclass",
-          "text": "Click `Inspect / edit`. Set Patch mode `Hook` and Hook semantics `Insert after`: your code runs right after the original dec."
+          "text": "Click `Inspect / edit`. Set Patch mode to `Hook` and Hook semantics to `Insert after`.",
+          "why": "A hook adds more code than fits in place: the game jumps to new memory, runs the original dec, then your code, then jumps back. Insert after means the original dec runs first."
         },
         {
           "where": "reclass",
-          "text": "Paste this into the Assembly pane. RAX points at ammo (Actor + 0x4), so faction is at [rax+0x18] and health at [rax-0x4]:\npushfq\ncmp dword [rax + 0x18], 1\njne .done\nadd dword [rax - 0x4], 5\n.done:\npopfq"
+          "text": "Select everything in the Assembly pane and replace it with the code below. Don't keep the `dec dword [rax]` line: Insert after already runs it, and keeping it would take 2 ammo per shot.\n\nRAX points at ammo (ROOKIE + 0x4), so faction is at [rax+0x18] and health at [rax-0x4]:\npushfq\ncmp dword [rax + 0x18], 1\njne .done\nadd dword [rax - 0x4], 5\n.done:\npopfq",
+          "why": "cmp/jne skips the heal unless the shooter's faction is 1 (the player). pushfq/popfq save and restore the CPU flags so the game never notices your comparison."
         },
         {
           "where": "reclass",
-          "text": "Click `Prepare hook`, look over the Change preview, then `Apply`.",
-          "check": "patched"
+          "text": "Click `Prepare hook` (next to Preview at the bottom) and look at the Change preview: it now draws the jump from the game code at `{{live.ammo.site.hex}}` into the hook code and back. Then click `Apply`.",
+          "check": "patched",
+          "show": "GAME CODE {{live.ammo.site.hex}}\n  now starts with E9 ...  <- jmp\nHOOK CODE (Insert after)\n  dec dword [rax]   <- original\n  your code\nBACK IN THE GAME\n(a far hook uses a longer FF 25 jump)",
+          "see": "Patch applied and verified."
         },
         {
           "where": "game",
-          "text": "Shoot: health +5, ammo −1. Wait for the sentinel to fire: nobody heals.",
+          "text": "Shoot once: health +5, ammo -1. Then wait for the sentinel to fire: its shots run the same code, but nobody heals.",
           "check": "primary"
         },
         {
           "where": "reclass",
           "text": "Click `Restore original`.",
-          "check": "restored"
+          "check": "restored",
+          "why": "The jump is removed. The memory holding your code stays until the game exits, but nothing jumps to it any more.",
+          "see": "Entry restored. Published hook memory remains executable until target exit."
         },
         {
           "where": "game",
@@ -837,7 +892,7 @@
         }
       ],
       "learned": "A hook adds code without overwriting it: the original instruction moves into a trampoline. Insert before runs your code first; Replace selection drops the original, so you must include it yourself.",
-      "restore": "Restore original (or Patches → Restore all) before leaving.",
+      "restore": "`Restore original`, or `Debugger → Saved and active patches…` → `Restore all`, before leaving. Restart room never restores code.",
       "explain": [
         {
           "title": "The big idea",
@@ -865,7 +920,8 @@
       "steps": [
         {
           "where": "reclass",
-          "text": "In your ROOKIE class, right-click the keycard row (offset 0024) → `Find out what accesses this address...`."
+          "text": "In your ROOKIE class, right-click the keycard row (0024, `UInt8` since Blast Door) → `Find out what accesses this address...`.",
+          "see": "Rows whose counts climb every frame appear straight away: the game drawing your status. Ignore those."
         },
         {
           "where": "game",
@@ -874,11 +930,13 @@
         },
         {
           "where": "reclass",
-          "text": "Select the row whose count rose when you pressed E (the vault's `cmp byte [rax+0x24], 1`; press E again if unsure), click `Confirm next execution`, then press E at the vault again."
+          "text": "Find the row whose count rose by one when you pressed E: `{{live.vault.entry.hex}}`, `cmp byte [rax+0x24],1` (\"is the keycard 1?\"). Select it, click `Confirm next execution`, then press E at the vault again.",
+          "show": "Instruction address   Bytes        Instruction\n{{live.vault.entry.hex}}  80 78 24 01  cmp byte [rax+0x24],1\n  <- the vault's first check\n(a row with and al,1 is marked Unlikely)",
+          "see": "The row gets a green CONFIRMED badge."
         },
         {
           "where": "reclass",
-          "text": "Click `Find accessed addresses`, tick `Pause on match`, click `Apply condition`. `Stop` the first window."
+          "text": "Click `Find accessed addresses`. In the new window tick `Pause on match` and click `Apply condition` (no condition needed: you want the very next run). Then click `Stop` in the first window."
         },
         {
           "where": "game",
@@ -887,16 +945,21 @@
         },
         {
           "where": "reclass",
-          "text": "Select the captured row and press `Step into (F11)` a few times. Watch which conditional jump goes to the rejection: keycard first, then clearance (must be 2), then the alarm bit."
+          "text": "Select the captured row and press `Step into (F11)` once. The Registers tab then shows the registers after that one step: look at the RIP tile, the address of the next instruction to run.",
+          "why": "The pause happens just after the cmp ran, so the next instruction is its jne. One step runs that jump. Every jne goes to the same deny code.",
+          "show": "Vault code, this run\n{{live.vault.entry.hex}}\n+00 cmp byte [rax+0x24],1  <- keycard\n+04 jne deny\n+06 cmp dword [rax+0x20],2 <- clearance\n+0A jne deny\n+0C test dword [rax+0x18],2\n                          <- alarm bit\n+13 jne deny\n+15 mov eax,1              <- open\n+1C xor eax,eax            <- deny\n    at {{live.vault.deny.hex}}",
+          "see": "RIP = 0x{{live.vault.deny.row}}: the jump went to deny, so the keycard check failed. With the keycard fixed, RIP would land on +06, the clearance check."
         },
         {
           "where": "reclass",
-          "text": "Click `Trace selected thread`, keep the limits, click `Trace`, and save the CSV. It lists every executed instruction with registers before and after. Then `Resume (F5)` and `Stop` the watch."
+          "text": "Click `Trace selected thread`, keep the limits, click `Trace` and save the CSV. Tracing leaves the game paused: click `Resume (F5)`, then `Stop` the watch.",
+          "why": "The CSV has one line per instruction the thread ran: address, instruction, thread, and the registers before and after. Comparing a failing run with a passing one shows exactly where they split."
         },
         {
           "where": "reclass",
-          "text": "Fix the inputs in your class: keycard (0x24) = 1, clearance (0x20) = 2, flags (0x18) = 0.",
-          "check": "write:keycard"
+          "text": "Fix all three inputs in your class: keycard (0024) = `1`, clearance (0020) = `2`, flags (0018) = `0`.",
+          "check": "write:keycard",
+          "why": "keycard must be exactly 1, clearance exactly 2, and the alarm bit (bit 1 of flags) clear. 0 clears it."
         },
         {
           "where": "game",
@@ -912,7 +975,7 @@
         },
         {
           "title": "Compare and jump",
-          "text": "Decisions in code are a compare (`cmp`) followed by a conditional jump. The compare sets CPU flags; the jump goes elsewhere if the condition holds. Stepping with `Step into (F11)` shows which jump sends you to the rejection."
+          "text": "Decisions in code are a compare (`cmp` or `test`) followed by a conditional jump. The compare sets CPU flags; the jump goes elsewhere if the condition holds. After each `Step into (F11)`, RIP in the register view tells you where execution went. Landing on the deny code at `{{live.vault.deny.hex}}` means the check just before it failed."
         },
         {
           "title": "Traces",
@@ -932,30 +995,37 @@
       "steps": [
         {
           "where": "reclass",
-          "text": "Find and confirm the ammo writer as in Overclock, click `Inspect / edit`, replace it with `inc dword [rax]` and click `Preview`."
+          "text": "Find and confirm the ammo writer as in Overclock: row 0004 → `Find out what writes to this address...`, shoot, select `{{live.ammo.site.hex}}` `dec dword [rax]` → `Confirm next execution`, shoot again.\n\nThen click `Inspect / edit` and change `dec dword [rax]` to `inc dword [rax]` in the Assembly pane. Don't click Preview yet.",
+          "show": "Code address: {{live.ammo.site.row}}\nAssembly: inc dword [rax]"
         },
         {
           "where": "reclass",
-          "text": "Enter a Name, set Saved locator `Module + offset`, click `Save definition`, then `File` → `Save`. The * in the title disappears once saved."
+          "text": "Give the patch a Name (for example `Overclock`) and set `Saved locator` to `Module + offset`. Click `Save definition`, then in the main ReClass window `File` → `Save`. The first time, it asks where to save the project. The * in the title disappears once saved.",
+          "why": "Module + offset stores the patch as \"this .exe, this many bytes in\". The .exe's start address changes every run, but the offset doesn't.",
+          "show": "Saved locator: Module + offset\n{{live.ammo.site.mod}}\n  <- what gets saved"
         },
         {
           "where": "reclass",
-          "text": "`Apply`, shoot once to see ammo go up, then `Restore original`.",
-          "check": "restored"
+          "text": "Now click `Preview`, then `Apply`. Shoot once to see ammo go up, then click `Restore original`.",
+          "check": "restored",
+          "why": "Preview comes last because changing the Name or the locator clears an earlier preview, and Apply needs a current one."
         },
         {
           "where": "game",
-          "text": "Quit the game (Ctrl+Q) and start it again: it reopens in this room with every address changed."
+          "text": "Quit the game (Ctrl+Q) and start it again. It reopens in this room with every address changed: right now the ammo instruction is at `{{live.ammo.site.hex}}`; after the restart this step shows a new number."
         },
         {
           "where": "reclass",
-          "text": "Attach to the new PID. Open `Debugger` → `Saved and active patches...`, select your definition, click `Preview` (it resolves the new address from module + offset), then `Apply`.",
-          "check": "patched"
+          "text": "In ReClass attach to the new process (the PID in the game's top bar). Open `Debugger` → `Saved and active patches…`, select your definition, click `Preview`, then `Apply`.",
+          "check": "patched",
+          "show": "Name       Target\nOverclock  {{live.ammo.site.mod}}\n\nPreview of Overclock:\n{{live.ammo.site.hex}}: FF 08 -> FF 00",
+          "see": "The preview finds the instruction at its new address, {{live.ammo.site.hex}}, from the saved module + offset."
         },
         {
           "where": "game",
-          "text": "Shoot 3 times: ammo goes up.",
-          "check": "primary"
+          "text": "Shoot 3 times.",
+          "check": "primary",
+          "see": "Ammo goes up."
         },
         {
           "where": "reclass",
@@ -964,12 +1034,13 @@
         },
         {
           "where": "game",
-          "text": "Shoot once: ammo goes down.",
-          "check": "complete"
+          "text": "Shoot once.",
+          "check": "complete",
+          "see": "Ammo goes down."
         }
       ],
       "learned": "Absolute addresses die with the process. Module + offset (or a unique byte pattern) finds the same code in every new process.",
-      "restore": "Restore original (or Patches → Restore all) before leaving.",
+      "restore": "`Restore original`, or `Debugger → Saved and active patches…` → `Restore all`, before leaving. Restart room never restores code.",
       "explain": [
         {
           "title": "The big idea",
