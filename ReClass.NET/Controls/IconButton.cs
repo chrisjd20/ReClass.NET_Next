@@ -153,6 +153,12 @@ namespace ReClassNET.Controls
 
 			var imageRect = ImageRectangle;
 
+			if (UI.AppTheme.Current.IsDark)
+			{
+				g.DrawImage(Enabled ? UI.IconContrast.ForDark(image) : UI.IconContrast.Disabled(image), imageRect);
+				return;
+			}
+
 			if (!Enabled)
 			{
 				var disposeImage = false;

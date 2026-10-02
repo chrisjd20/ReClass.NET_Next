@@ -27,6 +27,16 @@ namespace ReClassNET.Controls
 		{
 			title = string.Empty;
 			text = string.Empty;
+			UI.AppTheme.Changed += ThemeChanged;
+		}
+
+		// The banner is a pre-rendered image, so it is rebuilt when the theme switches.
+		private void ThemeChanged(object sender, System.EventArgs e) => UpdateBanner();
+
+		protected override void Dispose(bool disposing)
+		{
+			if (disposing) UI.AppTheme.Changed -= ThemeChanged;
+			base.Dispose(disposing);
 		}
 
 		protected override void SetBoundsCore(int x, int y, int width, int height, BoundsSpecified specified)

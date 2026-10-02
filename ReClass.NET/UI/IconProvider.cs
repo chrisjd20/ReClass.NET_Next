@@ -27,5 +27,6 @@ namespace ReClassNET.UI
 		public Image Pointer { get; } = DpiUtil.ScaleImage(Properties.Resources.B16x16_Pointer_Type);
 		public Image Function { get; } = DpiUtil.ScaleImage(Properties.Resources.B16x16_Function_Type);
 		public Image VirtualTable { get; } = DpiUtil.ScaleImage(Properties.Resources.B16x16_Interface_Type);
+		public Image InvalidMemory { get; } = DpiUtil.ScaleImage(Properties.Resources.B16x16_Error);
 	}
 }

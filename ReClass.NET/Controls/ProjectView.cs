@@ -229,7 +229,7 @@ namespace ReClassNET.Controls
 			DoubleBuffered = true;
 
 			projectTreeView.TreeViewNodeSorter = new NodeSorter();
-			projectTreeView.ImageList = new ImageList();
+			projectTreeView.ImageList = new ImageList { ColorDepth = ColorDepth.Depth32Bit };
 			projectTreeView.ImageList.Images.Add(Properties.Resources.B16x16_Text_List_Bullets);
 			projectTreeView.ImageList.Images.Add(Properties.Resources.B16x16_Class_Type);
 			projectTreeView.ImageList.Images.Add(Properties.Resources.B16x16_Category);

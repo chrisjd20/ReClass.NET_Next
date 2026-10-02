@@ -79,7 +79,7 @@ namespace ReClassNET.Controls
 
 			if (string.IsNullOrEmpty(Text) && Focused == false)
 			{
-				using var brush = new SolidBrush(UI.AppTheme.Current.IsDark ? UI.AppTheme.Current.Faint : PlaceholderColor);
+				using var brush = new SolidBrush(UI.AppTheme.Current.IsDark ? UI.AppTheme.Current.Muted : PlaceholderColor);
 
 				e.Graphics.DrawString(PlaceholderText ?? string.Empty, Font, brush, new PointF(-1.0f, 1.0f));
 			}

@@ -114,6 +114,9 @@ namespace ReClassNET.Forms
 			toolStrip.Items.AddRange(NodeTypesBuilder.CreateToolStripButtons(ReplaceSelectedNodesWithType).ToArray());
 			changeTypeToolStripMenuItem.DropDownItems.AddRange(NodeTypesBuilder.CreateToolStripMenuItems(ReplaceSelectedNodesWithType, false).ToArray());
 
+			// Plugins and the node-type buttons arrive after IconForm applied the theme; theme what they added.
+			AppTheme.Apply(this);
+
 			var createDefaultProject = true;
 
 			if (Program.CommandLineArgs.FileName != null)

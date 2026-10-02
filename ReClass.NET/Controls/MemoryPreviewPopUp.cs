@@ -123,7 +123,7 @@ namespace ReClassNET.Controls
 				{
 					e.Graphics.FillRectangle(brush, ClientRectangle);
 				}
-				using (var pen = new Pen(DrawContext.Settings.BackgroundColor.Invert(), 1))
+				using (var pen = new Pen(UI.AppTheme.Current.IsDark ? UI.AppTheme.Current.Border : DrawContext.Settings.BackgroundColor.Invert(), 1))
 				{
 					e.Graphics.DrawRectangle(pen, new Rectangle(Bounds.X, Bounds.Y, Bounds.Width - 1, Bounds.Height - 1));
 				}

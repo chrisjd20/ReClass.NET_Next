@@ -68,6 +68,9 @@ namespace ReClassNET
 			Settings = SettingsSerializer.Load();
 			Logger = new GuiLogger();
 
+			// Native menus (the Cut/Copy/Paste menu of text boxes) may follow each window's dark theme on Windows 10+.
+			AppTheme.AllowDarkNativeMenus();
+
 			// Context menus, drop-downs and status bars follow the Light/Dark theme too.
 			ToolStripManager.Renderer = new CustomToolStripProfessionalRenderer(true, true);
 

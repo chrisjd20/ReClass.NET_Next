@@ -147,6 +147,14 @@ namespace ReClassNET.Controls
 			);
 			drawnSize.Width += 10;
 
+			if (!args.Process.IsValid)
+			{
+				// One hint instead of an error icon on every row: nothing is attached, so memory can't be read.
+				var hint = "No process attached: memory can't be read. Use Process > Attach to Process... or the toolbar's process button.";
+				var color = UI.AppTheme.Current.IsDark ? UI.AppTheme.Current.Muted : SystemColors.GrayText;
+				TextRenderer.DrawText(e.Graphics, hint, Font, new Point(12, ClientRectangle.Bottom - TextRenderer.MeasureText(hint, Font).Height - 10), color);
+			}
+
 			/*foreach (var spot in hotSpots.Where(h => h.Type == HotSpotType.Select))
 			{
 				e.Graphics.DrawRectangle(new Pen(new SolidBrush(Color.FromArgb(150, 255, 0, 0)), 1), spot.Rect);

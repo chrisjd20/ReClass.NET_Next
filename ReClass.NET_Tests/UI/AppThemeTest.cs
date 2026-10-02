@@ -95,6 +95,50 @@ namespace ReClass.NET_Tests.UI
 			Check.That(explanation.Text).Contains(expected);
 		}
 
+		private static double Luminance(Color c) => (0.299 * c.R + 0.587 * c.G + 0.114 * c.B) / 255;
+
+		[Fact]
+		public void DarkPixelsAreLiftedKeepingAlphaAndHue()
+		{
+			var black = IconContrast.LiftPixel(Color.FromArgb(200, 0, 0, 0));
+			var navy = IconContrast.LiftPixel(Color.FromArgb(255, 0, 0, 128));
+
+			Check.That(black.A).IsEqualTo(200);
+			Check.That(Luminance(black)).IsStrictlyGreaterThan(0.55);
+			Check.That((int)navy.B).IsStrictlyGreaterThan(navy.R);
+			Check.That(Luminance(navy)).IsStrictlyGreaterThan(0.55);
+		}
+
+		[Fact]
+		public void BrightPixelsAndTransparentPixelsAreUnchanged()
+		{
+			var white = Color.FromArgb(255, 240, 240, 240);
+			var clear = Color.FromArgb(0, 0, 0, 0);
+
+			Check.That(IconContrast.LiftPixel(white)).IsEqualTo(white);
+			Check.That(IconContrast.LiftPixel(clear)).IsEqualTo(clear);
+		}
+
+		[Fact]
+		public void DisabledIconsAreGreyAndHalfTransparentButVisible()
+		{
+			using (var source = new Bitmap(2, 1))
+			{
+				source.SetPixel(0, 0, Color.FromArgb(255, 0, 0, 255));
+				source.SetPixel(1, 0, Color.FromArgb(0, 0, 0, 0));
+
+				var disabled = (Bitmap)IconContrast.Disabled(source);
+				var pixel = disabled.GetPixel(0, 0);
+
+				Check.That(pixel.R).IsEqualTo(pixel.G);
+				Check.That(pixel.G).IsEqualTo(pixel.B);
+				Check.That((int)pixel.A).IsStrictlyLessThan(255);
+				Check.That((int)pixel.A).IsStrictlyGreaterThan(100);
+				Check.That((int)pixel.R).IsStrictlyGreaterThan(100);
+				Check.That((int)disabled.GetPixel(1, 0).A).IsEqualTo(0);
+			}
+		}
+
 		[Fact]
 		public void TokenOffsetsComeFromTheWholePrefix()
 		{

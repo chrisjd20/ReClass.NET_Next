@@ -408,7 +408,8 @@ namespace ReClassNET.Nodes
 				return x + size;
 			}
 
-			context.Graphics.DrawImage(icon, x + 2, y, size, size);
+			// Many icons are dark glyphs; the Dark theme draws a lifted copy so they stay visible.
+			context.Graphics.DrawImage(UI.AppTheme.Current.IsDark ? UI.IconContrast.ForDark(icon) : icon, x + 2, y, size, size);
 
 			if (id != HotSpot.NoneId)
 			{
@@ -515,9 +516,10 @@ namespace ReClassNET.Nodes
 		/// <param name="y">The y coordinate.</param>
 		protected void DrawInvalidMemoryIndicatorIcon(DrawContext context, int y)
 		{
-			if (!context.Memory.ContainsValidData)
+			// Without a process nothing can be read; the view shows one hint for that instead of an icon on every row.
+			if (!context.Memory.ContainsValidData && context.Process != null && context.Process.IsValid)
 			{
-				AddIcon(context, 0, y, Properties.Resources.B16x16_Error, HotSpot.NoneId, HotSpotType.None);
+				AddIcon(context, 0, y, context.IconProvider.InvalidMemory, HotSpot.NoneId, HotSpotType.None);
 			}
 		}
 	}

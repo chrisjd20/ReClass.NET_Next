@@ -28,7 +28,7 @@ namespace ReClassNET.Forms
 
 			InitializeComponent();
 
-			tabControl.ImageList = new ImageList();
+			tabControl.ImageList = new ImageList { ColorDepth = ColorDepth.Depth32Bit };
 			tabControl.ImageList.Images.Add(Properties.Resources.B16x16_Category);
 			tabControl.ImageList.Images.Add(Properties.Resources.B16x16_Page_White_Stack);
 			modulesTabPage.ImageIndex = 0;

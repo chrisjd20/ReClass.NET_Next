@@ -26,6 +26,17 @@ namespace ReClassNET.UI
 
 		protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e)
 		{
+			var p = AppTheme.Current;
+			if (p.IsDark)
+			{
+				// Base draws status bar and drop-down edges in light system colours.
+				if (e.ToolStrip is StatusStrip) return;
+				if (e.ToolStrip is ToolStripDropDown)
+				{
+					using (var pen = new Pen(p.Border)) e.Graphics.DrawRectangle(pen, 0, 0, e.ToolStrip.Width - 1, e.ToolStrip.Height - 1);
+					return;
+				}
+			}
 			if (renderBorder || e.ToolStrip is ToolStripDropDown)
 			{
 				base.OnRenderToolStripBorder(e);
@@ -59,33 +70,64 @@ namespace ReClassNET.UI
 			using (var brush = new SolidBrush(AppTheme.Current.Faint))
 				for (int row = 0; row < 3; ++row)
 					for (int column = row; column < 3; ++column)
-						e.Graphics.FillRectangle(brush, grip.Right - 4 - (2 - column) * 4 + (2 - row) * 0, grip.Bottom - 4 - (2 - row) * 4, 2, 2);
+						e.Graphics.FillRectangle(brush, grip.Right - 4 - (2 - column) * 4, grip.Bottom - 4 - (2 - row) * 4, 2, 2);
 		}
 
-		// Grey glyph icons (the node-type buttons, for example) vanish on dark backgrounds; Dark draws a lightened copy.
+		// Dark glyph icons (the node-type buttons, for example) vanish on dark backgrounds; Dark draws lightened copies,
+		// and one readable style for disabled icons.
 		protected override void OnRenderItemImage(ToolStripItemImageRenderEventArgs e)
 		{
-			if (!AppTheme.Current.IsDark || e.Image == null) { base.OnRenderItemImage(e); return; }
-			var image = IconContrast.ForDark(e.Image);
-			if (ReferenceEquals(image, e.Image)) { base.OnRenderItemImage(e); return; }
-			if (e.Item.Enabled) e.Graphics.DrawImage(image, e.ImageRectangle);
-			else
-			{
-				using (var attributes = new System.Drawing.Imaging.ImageAttributes())
-				{
-					attributes.SetColorMatrix(new System.Drawing.Imaging.ColorMatrix { Matrix33 = 0.35f });
-					e.Graphics.DrawImage(image, e.ImageRectangle, 0, 0, image.Width, image.Height, GraphicsUnit.Pixel, attributes);
-				}
-			}
+			if (!AppTheme.Current.IsDark || e.Image == null || e.ImageRectangle.IsEmpty) { base.OnRenderItemImage(e); return; }
+			e.Graphics.DrawImage(e.Item.Enabled ? IconContrast.ForDark(e.Image) : IconContrast.Disabled(e.Image), e.ImageRectangle);
 		}
 
-		// Items keep their default ForeColor (black); in Dark the renderer supplies readable colours instead.
+		// Base re-applies system text colours (MenuText for idle top-level menu items, GrayText for disabled items), so
+		// Dark draws item text itself.
 		protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
 		{
 			var p = AppTheme.Current;
-			if (p.IsDark && (e.Item.ForeColor == SystemColors.ControlText || e.Item.ForeColor == SystemColors.MenuText || e.Item.ForeColor == SystemColors.WindowText))
-				e.TextColor = e.Item.Enabled ? p.Text : p.Faint;
-			base.OnRenderItemText(e);
+			if (!p.IsDark || string.IsNullOrEmpty(e.Text) || e.TextDirection != ToolStripTextDirection.Horizontal) { base.OnRenderItemText(e); return; }
+			var own = e.Item.ForeColor;
+			var color = !e.Item.Enabled ? p.Muted : Luminance(own) > 0.55 ? own : p.Text;
+			TextRenderer.DrawText(e.Graphics, e.Text, e.TextFont, e.TextRectangle, color, e.TextFormat);
+		}
+
+		private static double Luminance(Color c) => (0.299 * c.R + 0.587 * c.G + 0.114 * c.B) / 255;
+
+		// The stock check mark is a black glyph.
+		protected override void OnRenderItemCheck(ToolStripItemImageRenderEventArgs e)
+		{
+			var p = AppTheme.Current;
+			if (!p.IsDark) { base.OnRenderItemCheck(e); return; }
+			var box = Rectangle.Inflate(e.ImageRectangle, 2, 2);
+			using (var back = new SolidBrush(AppTheme.Mix(p.Raised, p.Blue, .35f))) e.Graphics.FillRectangle(back, box);
+			using (var border = new Pen(AppTheme.Mix(p.Raised, p.Blue, .7f))) e.Graphics.DrawRectangle(border, box.X, box.Y, box.Width - 1, box.Height - 1);
+			if (e.Image != null && !(e.Item is ToolStripMenuItem menu && menu.Image == null))
+			{
+				e.Graphics.DrawImage(IconContrast.ForDark(e.Image), e.ImageRectangle);
+				return;
+			}
+			var r = e.ImageRectangle;
+			var old = e.Graphics.SmoothingMode;
+			e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+			using (var pen = new Pen(p.Text, 2f) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round })
+				e.Graphics.DrawLines(pen, new[] { new PointF(r.X + r.Width * .22f, r.Y + r.Height * .52f), new PointF(r.X + r.Width * .42f, r.Y + r.Height * .72f), new PointF(r.X + r.Width * .78f, r.Y + r.Height * .3f) });
+			e.Graphics.SmoothingMode = old;
+		}
+
+		// Base draws the overflow chevron and its "customize" bar in light system colours.
+		protected override void OnRenderOverflowButtonBackground(ToolStripItemRenderEventArgs e)
+		{
+			var p = AppTheme.Current;
+			if (!p.IsDark) { base.OnRenderOverflowButtonBackground(e); return; }
+			var bounds = new Rectangle(Point.Empty, e.Item.Size);
+			using (var back = new SolidBrush(e.Item.Pressed ? p.Border : e.Item.Selected ? p.Hover : p.Raised)) e.Graphics.FillRectangle(back, bounds);
+			int cx = bounds.Width / 2, cy = bounds.Height - 8;
+			using (var pen = new Pen(p.Muted, 1.5f))
+			{
+				e.Graphics.DrawLine(pen, cx - 3, cy - 6, cx + 3, cy - 6);
+				e.Graphics.DrawLines(pen, new[] { new Point(cx - 3, cy - 2), new Point(cx, cy + 1), new Point(cx + 3, cy - 2) });
+			}
 		}
 
 		protected override void OnRenderArrow(ToolStripArrowRenderEventArgs e)
@@ -95,35 +137,62 @@ namespace ReClassNET.UI
 		}
 	}
 
-	/// <summary>Lightens icons that are too dark to read on a dark background. Bright icons are returned unchanged.</summary>
-	internal static class IconContrast
+	/// <summary>Contrast helpers for icons drawn on dark backgrounds. Results are cached per image.</summary>
+	public static class IconContrast
 	{
-		private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Image, Image> cache = new System.Runtime.CompilerServices.ConditionalWeakTable<Image, Image>();
+		private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Image, Image> lifted = new System.Runtime.CompilerServices.ConditionalWeakTable<Image, Image>();
+		private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Image, Image> disabled = new System.Runtime.CompilerServices.ConditionalWeakTable<Image, Image>();
 
-		public static Image ForDark(Image image) => cache.GetValue(image, Convert);
+		/// <summary>The image with every too-dark pixel lifted (keeping its hue), or the image itself if nothing needed it.</summary>
+		public static Image ForDark(Image image) => image == null ? null : lifted.GetValue(image, Lift);
 
-		private static Image Convert(Image image)
+		/// <summary>A disabled look that stays readable on dark: greyscale, lifted towards grey, half transparent.</summary>
+		public static Image Disabled(Image image) => image == null ? null : disabled.GetValue(image, MakeDisabled);
+
+		/// <summary>
+		/// Lifts one pixel: anything darker than about 0.42 perceived brightness is mixed towards white so it reaches about
+		/// 0.62, keeping hue and alpha. Brighter pixels are unchanged. Per pixel, so black outlines brighten too.
+		/// </summary>
+		public static Color LiftPixel(Color c)
 		{
-			if (!(image is Bitmap bitmap) || bitmap.Width > 64 || bitmap.Height > 64) return image;
-			// Perceived brightness: navy, maroon and pure blue glyphs count as dark even though they are saturated.
-			double luminance = 0; int opaque = 0;
+			double luminance = (0.299 * c.R + 0.587 * c.G + 0.114 * c.B) / 255;
+			if (c.A == 0 || luminance >= 0.42) return c;
+			double amount = (0.62 - luminance) / (1 - luminance);
+			return Color.FromArgb(c.A, (int)(c.R + (255 - c.R) * amount), (int)(c.G + (255 - c.G) * amount), (int)(c.B + (255 - c.B) * amount));
+		}
+
+		private static Image Lift(Image image)
+		{
+			if (!(image is Bitmap bitmap) || bitmap.Width > 128 || bitmap.Height > 128) return image;
+			bool changed = false;
+			var result = new Bitmap(bitmap.Width, bitmap.Height);
 			for (int y = 0; y < bitmap.Height; ++y)
 				for (int x = 0; x < bitmap.Width; ++x)
 				{
 					var c = bitmap.GetPixel(x, y);
-					if (c.A < 128) continue;
-					luminance += (0.299 * c.R + 0.587 * c.G + 0.114 * c.B) / 255; ++opaque;
+					var lift = LiftPixel(c);
+					if (lift != c) changed = true;
+					result.SetPixel(x, y, lift);
 				}
-			if (opaque == 0 || luminance / opaque > 0.45) return image;
-			var light = new Bitmap(bitmap.Width, bitmap.Height);
+			if (changed) return result;
+			result.Dispose();
+			return image;
+		}
+
+		private static Image MakeDisabled(Image image)
+		{
+			if (!(image is Bitmap bitmap) || bitmap.Width > 128 || bitmap.Height > 128) return image;
+			var result = new Bitmap(bitmap.Width, bitmap.Height);
 			for (int y = 0; y < bitmap.Height; ++y)
 				for (int x = 0; x < bitmap.Width; ++x)
 				{
 					var c = bitmap.GetPixel(x, y);
-					// Mix towards white: the glyph keeps its hue (blue stays blue) but becomes readable on dark.
-					light.SetPixel(x, y, Color.FromArgb(c.A, c.R + (255 - c.R) * 55 / 100, c.G + (255 - c.G) * 55 / 100, c.B + (255 - c.B) * 55 / 100));
+					int grey = (int)(0.299 * c.R + 0.587 * c.G + 0.114 * c.B);
+					// Clearly dimmer than an enabled icon, but still easy to read on a dark toolbar.
+					grey = 150 + grey * 80 / 255;
+					result.SetPixel(x, y, Color.FromArgb(c.A * 72 / 100, grey, grey, grey));
 				}
-			return light;
+			return result;
 		}
 	}
 
@@ -188,5 +257,10 @@ namespace ReClassNET.UI
 		public override Color OverflowButtonGradientBegin => Dark ? P.Raised : base.OverflowButtonGradientBegin;
 		public override Color OverflowButtonGradientMiddle => Dark ? P.Raised : base.OverflowButtonGradientMiddle;
 		public override Color OverflowButtonGradientEnd => Dark ? P.Raised : base.OverflowButtonGradientEnd;
+		public override Color ImageMarginRevealedGradientBegin => Dark ? P.Raised : base.ImageMarginRevealedGradientBegin;
+		public override Color ImageMarginRevealedGradientMiddle => Dark ? P.Raised : base.ImageMarginRevealedGradientMiddle;
+		public override Color ImageMarginRevealedGradientEnd => Dark ? P.Raised : base.ImageMarginRevealedGradientEnd;
+		public override Color RaftingContainerGradientBegin => Dark ? P.Background : base.RaftingContainerGradientBegin;
+		public override Color RaftingContainerGradientEnd => Dark ? P.Background : base.RaftingContainerGradientEnd;
 	}
 }

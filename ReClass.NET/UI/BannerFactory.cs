@@ -29,7 +29,7 @@ namespace ReClassNET.UI
 			Contract.Requires(title != null);
 			Contract.Requires(text != null);
 
-			var bannerId = $"{bannerWidth}x{bannerHeight}:{title}:{text}";
+			var bannerId = $"{bannerWidth}x{bannerHeight}:{title}:{text}:{AppTheme.Current.Kind}";
 
 			if (skipCache || !imageCache.TryGetValue(bannerId, out var image))
 			{
@@ -39,9 +39,18 @@ namespace ReClassNET.UI
 					int xIcon = DpiScaleInt(10, bannerHeight);
 
 					var rect = new Rectangle(0, 0, bannerWidth, bannerHeight);
-					using (var brush = new LinearGradientBrush(rect, Color.FromArgb(151, 154, 173), Color.FromArgb(27, 27, 37), LinearGradientMode.Vertical))
+					var palette = AppTheme.Current;
+					// Dark: a quiet palette gradient with a teal accent line, instead of the bright classic band.
+					using (var brush = palette.IsDark
+						? new LinearGradientBrush(rect, AppTheme.Mix(palette.Raised, palette.Blue, .08f), palette.Background, LinearGradientMode.Horizontal)
+						: new LinearGradientBrush(rect, Color.FromArgb(151, 154, 173), Color.FromArgb(27, 27, 37), LinearGradientMode.Vertical))
 					{
 						g.FillRectangle(brush, rect);
+					}
+					if (palette.IsDark)
+					{
+						using (var accent = new LinearGradientBrush(new Rectangle(0, bannerHeight - 2, bannerWidth, 2), palette.Teal, Color.FromArgb(0, palette.Teal), LinearGradientMode.Horizontal))
+							g.FillRectangle(accent, 0, bannerHeight - 2, bannerWidth, 2);
 					}
 
 					int wIconScaled = StdIconDim;

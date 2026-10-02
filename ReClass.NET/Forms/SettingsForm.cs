@@ -28,7 +28,7 @@ namespace ReClassNET.Forms
 
 			InitializeComponent();
 
-			var imageList = new ImageList();
+			var imageList = new ImageList { ColorDepth = ColorDepth.Depth32Bit };
 			imageList.Images.Add(Properties.Resources.B16x16_Gear);
 			imageList.Images.Add(Properties.Resources.B16x16_Color_Wheel);
 			imageList.Images.Add(Properties.Resources.B16x16_Settings_Edit);
