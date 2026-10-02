@@ -84,7 +84,7 @@ namespace ReClassNET.Forms
 
 			if (addressListMemoryRecordList.Records.Any())
 			{
-				if (MessageBox.Show("Keep the current address list?", "Process has changed", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+				if (ReClassNET.UI.ThemedMessageBox.Show("Keep the current address list?", "Process has changed", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
 				{
 					addressListMemoryRecordList.Clear();
 				}
@@ -241,7 +241,7 @@ namespace ReClassNET.Forms
 
 				if (addressListMemoryRecordList.Records.Any())
 				{
-					if (MessageBox.Show("The address list contains addresses. Do you really want to open the file?", $"{Constants.ApplicationName} Scanner", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+					if (ReClassNET.UI.ThemedMessageBox.Show("The address list contains addresses. Do you really want to open the file?", $"{Constants.ApplicationName} Scanner", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
 					{
 						return;
 					}

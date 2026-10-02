@@ -17,7 +17,7 @@ using ReClassNET.UI.Debugger;
 
 namespace ReClassNET.Forms
 {
-	public sealed class AssemblyEditorForm : IconForm
+	public sealed class AssemblyEditorForm : IconForm, ISelfThemed
 	{
 		private readonly DebugWorkspace workspace;
 		private readonly PatchRepository repository;
@@ -77,6 +77,17 @@ namespace ReClassNET.Forms
 		private int loadedLength;
 		private long editVersion;
 		private bool syncing, busy, closingAfterCleanup, closeRequested, restored;
+		private TableLayoutPanel layout;
+
+		// Also called by AppTheme on a live Light/Dark switch.
+		public void ApplyTheme()
+		{
+			BackColor = DebuggerTheme.Background; ForeColor = DebuggerTheme.Text;
+			DebuggerTheme.Style(layout);
+			foreach (var box in new[] { originalBox, assemblyBox, hexBox, previewBox }) { box.BorderStyle = BorderStyle.None; box.BackColor = box.ReadOnly ? DebuggerTheme.Panel : DebuggerTheme.Raised; box.ForeColor = DebuggerTheme.Text; }
+			moduleLabel.ForeColor = modeHelp.ForeColor = semanticHelp.ForeColor = locatorHelp.ForeColor = DebuggerTheme.Muted;
+			DebuggerTheme.UseDarkChrome(this);
+		}
 
 		public AssemblyEditorForm(DebugWorkspace workspace, ulong address, BoundarySource boundary = BoundarySource.ExplicitOrigin, RegisterSnapshot snapshot = null, PatchDefinition definition = null)
 		{
@@ -142,8 +153,7 @@ namespace ReClassNET.Forms
 			var actions = Flow(); actions.Controls.AddRange(new Control[] { previewButton, prepareButton, cancelButton, applyButton, restoreButton, nopButton, saveButton, Spacer(), followRegisterButton, followOperandButton, reverseButton });
 			layout.Controls.Add(actions, 0, 6);
 			Controls.Add(layout); Controls.Add(status); Controls.Add(rail); Controls.Add(header);
-			DebuggerTheme.Style(layout);
-			foreach (var box in new[] { originalBox, assemblyBox, hexBox, previewBox }) { box.BorderStyle = BorderStyle.None; box.BackColor = box.ReadOnly ? DebuggerTheme.Panel : DebuggerTheme.Raised; box.ForeColor = DebuggerTheme.Text; }
+			this.layout = layout; ApplyTheme();
 			addressBox.Font = patternBox.Font = entryOffsetBox.Font = DebuggerTheme.Mono;
 			Tip(loadButton, "Read the original bytes at this address and decode them."); Tip(previewButton, "Show exactly which bytes would change. Nothing is written yet.");
 			Tip(applyButton, "Write the previewed change into the running game."); Tip(restoreButton, "Put the original bytes back.");
@@ -151,8 +161,6 @@ namespace ReClassNET.Forms
 			Tip(prepareButton, "Reserve hook memory and build the final hook code, so you can review it before Apply."); Tip(cancelButton, "Release a prepared hook without applying it.");
 			Tip(followRegisterButton, "Open the memory a captured register points at, as a class."); Tip(followOperandButton, "Open the memory this instruction's operand pointed at, as a class.");
 			Tip(reverseButton, "Watch this instruction and list every address it touches.");
-			DebuggerTheme.UseDarkChrome(this);
-
 			syncing = true;
 			addressBox.Text = address == 0 ? "" : address.ToString("X16"); nameBox.Text = this.definition.Name; lengthBox.Value = Math.Max(1, Math.Min(65536, this.definition.SelectionLength));
 			modeBox.SelectedValue = this.definition.Mode; semanticBox.SelectedValue = this.definition.HookMode; locatorBox.SelectedValue = this.definition.LocatorKind;
@@ -353,7 +361,7 @@ namespace ReClassNET.Forms
 		private Task PreviewAsync() => PreviewAsync(true);
 		private async Task PreviewAsync(bool confirmRelease)
 		{
-			if (confirmRelease && prepared != null && MessageBox.Show(this, "A hook is prepared and its memory at 0x" + prepared.Allocation.Address.ToString("X") + " is reserved.\n\nPreview again releases this reservation; you will need Prepare hook again before Apply. Continue?", "Release prepared hook?", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) { status.Text = "Preview cancelled; the prepared hook is still reserved. Choose Apply to install it."; return; }
+			if (confirmRelease && prepared != null && ReClassNET.UI.ThemedMessageBox.Show(this, "A hook is prepared and its memory at 0x" + prepared.Allocation.Address.ToString("X") + " is reserved.\n\nPreview again releases this reservation; you will need Prepare hook again before Apply. Continue?", "Release prepared hook?", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) { status.Text = "Preview cancelled; the prepared hook is still reserved. Choose Apply to install it."; return; }
 			await CancelPreparationAsync(); var candidate = BuildDefinition();
 			preview = await workspace.Planner.PreviewAsync(candidate, workspace.Target, operation.Token);
 			RenderPreview(); status.Text = preview.Message ?? "Preview ready. Original " + preview.OriginalBytes.Length + " bytes, installed " + preview.ReplacementBytes.Length + " bytes, NOP padding " + preview.PaddingLength + " bytes.";

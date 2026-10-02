@@ -10,7 +10,7 @@ namespace ReClassNET.Debugger
 			Contract.Requires(debugger != null);
 
 			return debugger.StartDebuggerIfNeeded(
-				() => MessageBox.Show(
+				() => ReClassNET.UI.ThemedMessageBox.Show(
 					"This will attach the debugger of ReClass.NET to the current process. Continue?",
 					"Confirmation",
 					MessageBoxButtons.YesNo,

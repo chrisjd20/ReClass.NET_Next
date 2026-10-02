@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics.Contracts;
+using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -38,12 +39,42 @@ namespace ReClassNET.Forms
 					code,
 					generator.Language == Language.Cpp ? Languages.Cpp : Languages.CSharp,
 					new RtfFormatter(),
-					StyleSheets.Default,
+					ThemedStyleSheet(),
 					writer
 				);
 			}
 
 			codeRichTextBox.Rtf = buffer.ToString();
+		}
+
+		/// <summary>The default code colours, brightened for the Dark theme so they stay readable.</summary>
+		private static IStyleSheet ThemedStyleSheet()
+		{
+			if (!AppTheme.Current.IsDark) return StyleSheets.Default;
+			var sheet = new DarkStyleSheet();
+			foreach (var style in StyleSheets.Default.Styles)
+			{
+				sheet.Styles.Add(new Style(style.ScopeName)
+				{
+					Foreground = Brighten(style.Foreground),
+					Background = Color.Empty,
+					Bold = style.Bold,
+					Italic = style.Italic,
+					CssClassName = style.CssClassName
+				});
+			}
+			return sheet;
+		}
+
+		private static Color Brighten(Color color)
+		{
+			if (color.IsEmpty || color.GetBrightness() < 0.12f) return AppTheme.Current.Text;
+			return color.GetBrightness() < 0.55f ? AppTheme.Mix(color, Color.White, 0.45f) : color;
+		}
+
+		private sealed class DarkStyleSheet : IStyleSheet
+		{
+			public StyleDictionary Styles { get; } = new StyleDictionary();
 		}
 
 		protected override void OnLoad(EventArgs e)

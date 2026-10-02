@@ -12,7 +12,8 @@ namespace ReClassNET.Util.Rtf
 
 		private readonly StringBuilder buffer;
 
-		private readonly Color defaultForeColor = Color.Black;
+		// Plain text must stay readable on the code view's background in either theme.
+		private readonly Color defaultForeColor = UI.AppTheme.Current.IsDark ? UI.AppTheme.Current.Text : Color.Black;
 		private readonly Color defaultBackColor = Color.Empty;
 		private readonly float defaultFontSize;
 

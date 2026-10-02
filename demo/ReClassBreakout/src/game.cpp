@@ -1,5 +1,6 @@
 #include "game.h"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <iomanip>
@@ -27,10 +28,17 @@ template<class T> std::string raw(const T& value) {
     for (std::size_t i = 0; i < sizeof(T); ++i) { if (i) s << ' '; s << std::setw(2) << unsigned(bytes[i]); }
     return s.str();
 }
+// Copies a text field with one bulk read. A debugger watching these bytes then stops the game once or twice per
+// call rather than once per letter, which keeps "Find out what accesses" on the callsign from crippling the game.
+std::array<unsigned char, 64> bulkCopy(const char* source, std::size_t size) {
+    std::array<unsigned char, 64> copy{};
+    std::memcpy(copy.data(), source, std::min(size, copy.size()));
+    return copy;
+}
 std::string stringValue(const char* source, std::size_t size) {
     std::string result;
-    const auto* bytes = reinterpret_cast<const volatile unsigned char*>(source);
-    for (std::size_t i = 0; i < size && bytes[i]; ++i) {
+    const auto bytes = bulkCopy(source, size);
+    for (std::size_t i = 0; i < std::min(size, bytes.size()) && bytes[i]; ++i) {
         unsigned char c = bytes[i];
         if (c >= 32 && c < 127) result.push_back(char(c));
         else { result += "\\x"; std::ostringstream s; s << std::hex << std::setw(2) << std::setfill('0') << unsigned(c); result += s.str(); }
@@ -559,9 +567,9 @@ std::vector<FieldSnapshot> Game::fields() const {
     };
     auto stringField = [&result](const std::string& label, const char* value, std::size_t size, const std::string& path) {
         std::string text = stringValue(value, size);
-        const auto* source = reinterpret_cast<const volatile unsigned char*>(value);
+        const auto source = bulkCopy(value, size);
         std::ostringstream s; s << std::hex << std::uppercase << std::setfill('0');
-        for (std::size_t i=0; i<size; ++i) { if (i) s << ' '; s << std::setw(2) << unsigned(source[i]); }
+        for (std::size_t i=0; i<std::min(size, source.size()); ++i) { if (i) s << ' '; s << std::setw(2) << unsigned(source[i]); }
         result.push_back({label, "char[" + std::to_string(size) + "]", text, text, s.str(), path, hex(reinterpret_cast<std::uintptr_t>(value)), true});
     };
     add("Module root", "World*", breakout_world_root, "module!breakout_world_root");

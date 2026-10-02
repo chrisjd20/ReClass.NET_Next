@@ -673,7 +673,7 @@ namespace ReClassNET.Controls
 					var current = hotSpots.FirstOrDefault(s => s.Type == HotSpotType.Select && s.Node == selected.Node && s.Address == selected.Address && s.Level == selected.Level);
 					if (current == null)
 					{
-						MessageBox.Show(this, "The selected row changed. Select the visible value again.", "Edit numeric value", MessageBoxButtons.OK, MessageBoxIcon.Information);
+						ReClassNET.UI.ThemedMessageBox.Show(this, "The selected row changed. Select the visible value again.", "Edit numeric value", MessageBoxButtons.OK, MessageBoxIcon.Information);
 						return;
 					}
 					var session = current.Process.SessionIdentity;

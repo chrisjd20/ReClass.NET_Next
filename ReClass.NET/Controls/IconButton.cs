@@ -20,7 +20,7 @@ namespace ReClassNET.Controls
 		public Image Image { get; set; }
 		public Rectangle ImageRectangle { get; } = new Rectangle(3, 3, 16, 16);
 
-		private readonly ProfessionalColorTable colorTable = new ProfessionalColorTable();
+		private readonly ProfessionalColorTable colorTable = new UI.CustomProfessionalColorTable();
 
 		public IconButton()
 		{

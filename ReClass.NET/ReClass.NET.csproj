@@ -1046,6 +1046,8 @@
     <Compile Include="Forms\PatchManagerForm.cs" />
     <Compile Include="Forms\WatchFinderForm.cs" />
     <Compile Include="Forms\MainForm.Debugger.cs" />
+    <Compile Include="UI\AppTheme.cs" />
+    <Compile Include="UI\ThemedMessageBox.cs" />
     <Compile Include="UI\Debugger\DebuggerTheme.cs" />
     <Compile Include="UI\Debugger\AsmTokens.cs" />
     <Compile Include="UI\Debugger\DebuggerPresenters.cs" />

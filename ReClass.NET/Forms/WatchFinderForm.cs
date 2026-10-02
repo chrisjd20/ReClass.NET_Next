@@ -19,7 +19,7 @@ using ReClassNET.UI.Debugger;
 namespace ReClassNET.Forms
 {
     // Capture aggregation happens on the session worker. The UI receives bounded dirty keys.
-    public sealed class WatchFinderForm:IconForm
+    public sealed class WatchFinderForm:IconForm,ISelfThemed
     {
         private sealed class Row
         {
@@ -70,9 +70,13 @@ namespace ReClassNET.Forms
         private readonly System.Windows.Forms.Timer timer=new System.Windows.Forms.Timer{Interval=100};
         private CancellationTokenSource traceCancellation=new CancellationTokenSource();
         private long dropped,totalHits;
+        // Row tallies kept by Aggregate, so the guidance never has to scan every row under the lock.
+        private int confirmedRows,unlikelyRows,candidateRows;
+        private int lastDetails;
         private volatile bool accepting;
         private bool closing,closePending,confirmPending,userPicked;
         private IDictionary<string,ulong> shownRegisters;
+        private FlowLayoutPanel toolbar;
         public WatchFinderForm(DebugWorkspace workspace,ulong address,int length,bool writeOnly,bool execution=false,bool boundaryKnown=false)
         {
             this.workspace=workspace;this.address=address;this.length=length;this.writeOnly=writeOnly;this.execution=execution;this.boundaryKnown=boundaryKnown;
@@ -87,7 +91,6 @@ namespace ReClassNET.Forms
                 ?"Watching the instruction at 0x"+address.ToString("X")+". Every address it reads or writes appears below."
                 :"Watching "+length+" byte"+(length==1?"":"s")+" at 0x"+address.ToString("X")+". Every instruction that "+(writeOnly?"writes":"reads or writes")+" them appears below.";
 
-            DarkGrid.Style(grid);
             AddColumn("state","Attribution",13,140);AddColumn("count","Count",6,56);AddColumn("assembly","NASM instruction / candidates",24,200);
             AddColumn("bytes","Bytes",10,90);AddColumn("code","Instruction address",13,120);AddColumn("module","Module + offset",17,140);
             AddColumn("data","Data address",12,110);AddColumn("width","Width / access",9,90);AddColumn("thread","Thread / phase",14,110);
@@ -136,11 +139,8 @@ namespace ReClassNET.Forms
             Add(trace,"Cancel trace",Resources.B16x16_Button_Remove,DarkButtonStyle.Ghost,()=>{traceCancellation.Cancel();return Task.FromResult(true);},"Stop a running trace.",false);
 
             Controls.Add(split);Controls.Add(status);Controls.Add(toolbar);Controls.Add(coach);Controls.Add(header);
-            DebuggerTheme.Style(toolbar);
-            condition.BackColor=DebuggerTheme.Raised;condition.ForeColor=DebuggerTheme.Text;condition.BorderStyle=BorderStyle.FixedSingle;condition.Font=DebuggerTheme.Mono;
-            details.BackColor=DebuggerTheme.Panel;details.ForeColor=DebuggerTheme.Text;details.BorderStyle=BorderStyle.None;
+            this.toolbar=toolbar;ApplyTheme();
             Load+=(s,e)=>{try{split.SplitterDistance=Math.Max(DpiUtil.ScaleIntY(160),(int)(split.Height*0.46));}catch(InvalidOperationException){}};
-            DebuggerTheme.UseDarkChrome(this);
             grid.SelectionChanged+=(s,e)=>ShowDetails();grid.MouseDown+=(s,e)=>userPicked=true;grid.KeyDown+=(s,e)=>userPicked=true;timer.Tick+=(s,e)=>{Flush();UpdateDebugButtons();UpdateGuidance();};timer.Start();
             condition.TextChanged+=(s,e)=>ConditionEdited();pauseMatch.CheckedChanged+=(s,e)=>ConditionEdited();
             workspace.Session.Diagnostic+=SessionDiagnostic;
@@ -149,6 +149,16 @@ namespace ReClassNET.Forms
             UpdateGuidance();
         }
         // Columns share the width by weight, so the grid fits the window without a horizontal scroll bar.
+        // Also called by AppTheme on a live Light/Dark switch.
+        public void ApplyTheme()
+        {
+            BackColor=DebuggerTheme.Background;ForeColor=DebuggerTheme.Text;
+            DebuggerTheme.Style(toolbar);
+            condition.BackColor=DebuggerTheme.Raised;condition.ForeColor=DebuggerTheme.Text;condition.BorderStyle=BorderStyle.FixedSingle;condition.Font=DebuggerTheme.Mono;
+            details.BackColor=DebuggerTheme.Panel;details.ForeColor=DebuggerTheme.Text;details.BorderStyle=BorderStyle.None;
+            DarkGrid.Style(grid);
+            DebuggerTheme.UseDarkChrome(this);
+        }
         private DataGridViewColumn AddColumn(string name,string text,float weight,int minimum)
         {
             var column=new DataGridViewTextBoxColumn{Name=name,HeaderText=text,SortMode=DataGridViewColumnSortMode.NotSortable,AutoSizeMode=DataGridViewAutoSizeColumnMode.Fill,FillWeight=weight,MinimumWidth=DpiUtil.ScaleIntX(minimum)};
@@ -180,7 +190,8 @@ namespace ReClassNET.Forms
             if(IsDisposed||closePending||pauseButton==null)return;
             var state=workspace.Session.State;bool idle=actions.CurrentCount!=0;bool hasRow=grid.SelectedRows.Count>0;
             pauseButton.Enabled=idle&&(state==DebugSessionState.Running||state==DebugSessionState.Detached);
-            resumeButton.Enabled=idle&&state==DebugSessionState.Paused;stepButton.Enabled=idle&&hasRow&&(state==DebugSessionState.Paused||state==DebugSessionState.Running);
+            bool held=state==DebugSessionState.Paused&&workspace.Session.HeldPaused;
+            resumeButton.Enabled=idle&&held;stepButton.Enabled=idle&&hasRow&&(state==DebugSessionState.Paused||state==DebugSessionState.Running);
             applyConditionButton.Enabled=idle&&(condition.Text!=appliedCondition||pauseMatch.Checked!=appliedPause);
             // Row actions already ignore clicks without a selection; disabling them makes that visible.
             foreach(var name in new[]{"Confirm next execution","Inspect / edit","Find accessed addresses","Follow data","Follow register…","Trace selected thread"})
@@ -192,18 +203,15 @@ namespace ReClassNET.Forms
             if(IsDisposed||closePending)return;
             var state=workspace.Session.State;
             int rows,confirmed,unlikely,candidates;long hits;
-            lock(records)
-            {
-                rows=records.Count;confirmed=records.Values.Count(r=>r.Confirmed);unlikely=records.Values.Count(r=>!r.Confirmed&&HitKinds.From(r.Status,false)==HitKind.Unlikely);
-                candidates=records.Values.Count(r=>!r.Confirmed&&HitKinds.From(r.Status,false)==HitKind.Candidate);hits=totalHits;
-            }
+            lock(records){rows=records.Count;confirmed=confirmedRows;unlikely=unlikelyRows;candidates=candidateRows;hits=totalHits;}
+            bool held=state==DebugSessionState.Paused&&workspace.Session.HeldPaused;
             if(confirmed>0)confirmPending=false;
             var selected=Selected();
-            var advice=WatchCoach.For(new WatchCoachState{Execution=execution,WriteOnly=writeOnly,Collecting=watchIds.Count>0,ConfirmPending=confirmPending,Paused=state==DebugSessionState.Paused,Detached=state==DebugSessionState.Detached,
+            var advice=WatchCoach.For(new WatchCoachState{Execution=execution,WriteOnly=writeOnly,Collecting=watchIds.Count>0,ConfirmPending=confirmPending,Paused=held,Detached=state==DebugSessionState.Detached,
                 Rows=rows,Confirmed=confirmed,Unlikely=unlikely,Candidates=candidates,Selected=selected==null?(HitKind?)null:HitKinds.From(selected.Status,selected.Confirmed)});
             coach.Show(advice);
             foreach(var pair in buttons)pair.Value.Glow=pair.Key==advice.Button&&pair.Value.Enabled;
-            header.SetPills(SessionPill(state),new DebuggerHeader.HeaderPill{Text=rows+(rows==1?" ROW":" ROWS")+" · "+hits+(hits==1?" HIT":" HITS"),Severity=Severity.Neutral});
+            header.SetPills(SessionPill(held?DebugSessionState.Paused:state==DebugSessionState.Paused?DebugSessionState.Running:state),new DebuggerHeader.HeaderPill{Text=rows+(rows==1?" ROW":" ROWS")+" · "+hits+(hits==1?" HIT":" HITS"),Severity=Severity.Neutral});
             bool animate=rows==0;
             foreach(var look in looks.Values)if(look.FlashUntil-Environment.TickCount>0){animate=true;break;}
             if(animate)grid.Invalidate();
@@ -297,21 +305,28 @@ namespace ReClassNET.Forms
             string key=instruction.ToString("X")+":"+data.ToString("X")+":"+width+":"+access;
             lock(records)
             {
-                Row row;
+                Row row;HitKind? before=null;
                 if(!records.TryGetValue(key,out row))
                 {
                     if(records.Count>=10000){accepting=false;_ = StopLimitedWatchAsync(hit.WatchId);return;}
                     records[key]=row=new Row{Key=key,Address=data,Code=instruction,Width=width,Access=access,First=hit};
                 }
+                else before=HitKinds.From(row.Status,row.Confirmed);
                 // A confirmed attribution is sticky; later unconfirmed data hits only update counts.
                 row.Count++;row.Latest=hit;totalHits++;
                 if(hit.Confirmed){row.Confirmed=true;row.ConfirmedHit=hit;row.Status=message;}
                 else if(!row.Confirmed)row.Status=message;
+                var after=HitKinds.From(row.Status,row.Confirmed);
+                if(before!=after){if(before.HasValue)Tally(before.Value,-1);Tally(after,1);}
                 if(!pendingKeys.Contains(key))
                 {
                     if(pendingKeys.Count<4096){pendingKeys.Add(key);dirty.Enqueue(key);}else Interlocked.Increment(ref dropped);
                 }
             }
+        }
+        private void Tally(HitKind kind,int delta)
+        {
+            if(kind==HitKind.Confirmed)confirmedRows+=delta;else if(kind==HitKind.Unlikely)unlikelyRows+=delta;else if(kind==HitKind.Candidate)candidateRows+=delta;
         }
         private async Task StopLimitedWatchAsync(Guid id)
         {
@@ -353,9 +368,11 @@ namespace ReClassNET.Forms
             if(!userPicked&&updates.Count>0&&grid.Rows.Count>0)
             {
                 var best=grid.Rows.Cast<DataGridViewRow>().OrderBy(r=>{Display look;var k=r.Tag as string;return k!=null&&looks.TryGetValue(k,out look)?Rank(look.Kind):9;}).First();
-                if(!best.Selected){grid.ClearSelection();best.Selected=true;}else ShowDetails();
+                if(!best.Selected){grid.ClearSelection();best.Selected=true;}
+                else if(unchecked(Environment.TickCount-lastDetails)>=1000)ShowDetails();
             }
-            else if(refreshSelection||selectedKey==null)ShowDetails();
+            // New hits on the selected row refresh the inspector at most once a second; selecting a row is immediate.
+            else if(selectedKey==null||refreshSelection&&unchecked(Environment.TickCount-lastDetails)>=1000)ShowDetails();
         }
         private static int Rank(HitKind kind){switch(kind){case HitKind.Confirmed:return 0;case HitKind.Candidate:return 1;case HitKind.Observed:return 2;case HitKind.Attempted:return 3;default:return 5;}}
         private void PaintCell(object sender,DataGridViewCellPaintingEventArgs e)
@@ -382,7 +399,7 @@ namespace ReClassNET.Forms
         private Row Selected(){if(grid.SelectedRows.Count==0)return null;var key=grid.SelectedRows[0].Tag as string;lock(records){Row row;return key!=null&&records.TryGetValue(key,out row)?Copy(row):null;}}
         private void ShowDetails()
         {
-            var row=Selected();if(row==null)return;var hit=row.Latest;var text=new StringBuilder();
+            var row=Selected();if(row==null)return;lastDetails=Environment.TickCount;var hit=row.Latest;var text=new StringBuilder();
             text.AppendLine("Code: 0x"+row.Code.ToString("X")+"   Watched data: 0x"+row.Address.ToString("X"));
             text.AppendLine("Event RIP: 0x"+hit.EventRip.ToString("X")+"   "+row.Status);
             var labels=workspace.Process.NamedAddresses.ToDictionary(p=>unchecked((ulong)p.Key.ToInt64()),p=>p.Value);

@@ -32,7 +32,7 @@ namespace ReClassNET.Debugger
 				if (IsAttached) return true;
 				if (!queryAttach()) return false;
 				try { process.DebugWorkspace.Session.AttachAsync().GetAwaiter().GetResult(); return true; }
-				catch (Exception e) { System.Windows.Forms.MessageBox.Show(e.Message, "Debugger attachment failed"); return false; }
+				catch (Exception e) { ReClassNET.UI.ThemedMessageBox.Show(e.Message, "Debugger attachment failed"); return false; }
 			}
 
 			lock (syncThread)

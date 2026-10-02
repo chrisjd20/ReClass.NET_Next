@@ -121,7 +121,7 @@ namespace ReClassNET.Forms
 			{
 				if (hotkeyListBox.Items.Count == 0)
 				{
-					MessageBox.Show("Please add at least one hotkey.", Constants.ApplicationName, MessageBoxButtons.OK, MessageBoxIcon.Error);
+					ReClassNET.UI.ThemedMessageBox.Show("Please add at least one hotkey.", Constants.ApplicationName, MessageBoxButtons.OK, MessageBoxIcon.Error);
 
 					return;
 				}

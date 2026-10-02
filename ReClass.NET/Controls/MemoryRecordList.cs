@@ -106,7 +106,7 @@ namespace ReClassNET.Controls
 				var record = (MemoryRecord)resultDataGridView.Rows[e.RowIndex].DataBoundItem;
 				if (record.IsRelativeAddress)
 				{
-					e.CellStyle.ForeColor = Color.ForestGreen;
+					e.CellStyle.ForeColor = UI.AppTheme.Current.Good;
 					e.FormattingApplied = true;
 					// Static (module) addresses survive restarts; show the formula that finds them again.
 					resultDataGridView.Rows[e.RowIndex].Cells[e.ColumnIndex].ToolTipText =
@@ -116,7 +116,7 @@ namespace ReClassNET.Controls
 			else if (e.ColumnIndex == 3) // Value
 			{
 				var record = (MemoryRecord)resultDataGridView.Rows[e.RowIndex].DataBoundItem;
-				e.CellStyle.ForeColor = record.HasChangedValue ? Color.Red : Color.Black;
+				e.CellStyle.ForeColor = record.HasChangedValue ? UI.AppTheme.Current.Changed : (UI.AppTheme.Current.IsDark ? UI.AppTheme.Current.Text : Color.Black);
 				e.FormattingApplied = true;
 			}
 		}

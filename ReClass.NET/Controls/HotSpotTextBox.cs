@@ -76,6 +76,10 @@ namespace ReClassNET.Controls
 			if (Visible)
 			{
 				BackColor = Program.Settings.BackgroundColor;
+				// The edit box sits on the memory view's background, so its text must contrast with it in either theme.
+				ForeColor = UI.AppTheme.Current.IsDark ? UI.AppTheme.Current.Text : SystemColors.WindowText;
+				editHint.BackColor = UI.AppTheme.Current.IsDark ? UI.AppTheme.Current.Raised : SystemColors.Info;
+				editHint.ForeColor = UI.AppTheme.Current.IsDark ? UI.AppTheme.Current.Text : SystemColors.InfoText;
 
 				if (currentHotSpot != null)
 				{
@@ -193,7 +197,7 @@ namespace ReClassNET.Controls
 				catch (Exception ex)
 				{
 					Hide();
-					MessageBox.Show(Parent, ex.Message, "Edit numeric value", MessageBoxButtons.OK, MessageBoxIcon.Error);
+					ReClassNET.UI.ThemedMessageBox.Show(Parent, ex.Message, "Edit numeric value", MessageBoxButtons.OK, MessageBoxIcon.Error);
 					return;
 				}
 			}

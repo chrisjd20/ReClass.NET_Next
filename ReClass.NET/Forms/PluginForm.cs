@@ -84,7 +84,7 @@ namespace ReClassNET.Forms
 			}
 			catch (Exception ex)
 			{
-				MessageBox.Show(ex.Message, "Provider not changed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+				ReClassNET.UI.ThemedMessageBox.Show(ex.Message, "Provider not changed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
 				functionsProvidersComboBox.SelectedItem = Program.CoreFunctions.CurrentFunctionsProvider;
 			}
 		}

@@ -5,6 +5,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Linq;
 using System.Windows.Forms;
+using ReClassNET.UI;
 using ReClassNET.UI.Debugger;
 
 namespace ReClassNET.Controls.Debugger
@@ -38,7 +39,7 @@ namespace ReClassNET.Controls.Debugger
 	public enum DarkButtonStyle { Secondary, Primary, Danger, Ghost }
 
 	/// <summary>A flat dark button with an optional icon. Text is the visible label, unchanged from the classic UI.</summary>
-	public class DarkButton : Button
+	public class DarkButton : Button, IPaintsOwnTheme
 	{
 		private bool hover, pressed, glow;
 		private DarkButtonStyle variant;
@@ -469,7 +470,7 @@ namespace ReClassNET.Controls.Debugger
 	}
 
 	/// <summary>A painted tab strip with pages, so the tabs stay dark on every platform.</summary>
-	public class InspectorTabs : Panel
+	public class InspectorTabs : Panel, IPaintsOwnTheme
 	{
 		private sealed class Strip : DebuggerControl
 		{
@@ -573,7 +574,7 @@ namespace ReClassNET.Controls.Debugger
 	}
 
 	/// <summary>A rounded panel with a caption; content goes in <see cref="Body"/>, small toggles in the header.</summary>
-	public class Card : Panel
+	public class Card : Panel, IPaintsOwnTheme
 	{
 		private string title;
 
@@ -653,7 +654,7 @@ namespace ReClassNET.Controls.Debugger
 	}
 
 	/// <summary>A wrapping group of toolbar buttons with a small caption above them.</summary>
-	public class ToolGroup : FlowLayoutPanel
+	public class ToolGroup : FlowLayoutPanel, IPaintsOwnTheme
 	{
 		public string Caption { get; }
 

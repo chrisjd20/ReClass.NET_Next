@@ -100,7 +100,7 @@ namespace ReClassNET.Controls
 			var rect = colorPanel.ClientRectangle;
 			rect.Width--;
 			rect.Height--;
-			e.Graphics.DrawRectangle(Pens.Black, rect);
+			using (var pen = new Pen(UI.AppTheme.Current.IsDark ? UI.AppTheme.Current.Muted : Color.Black)) e.Graphics.DrawRectangle(pen, rect);
 		}
 	}
 }

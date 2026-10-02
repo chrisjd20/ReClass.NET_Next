@@ -165,7 +165,7 @@ namespace ReClassNET.Forms
 				catch (OperationCanceledException) { e.Cancel = true; return; }
 				catch (Exception error)
 				{
-					if (MessageBox.Show(error.Message + Environment.NewLine + Environment.NewLine + "Exit anyway and leave the target as it is?", "Owned code could not be restored", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+					if (ReClassNET.UI.ThemedMessageBox.Show(error.Message + Environment.NewLine + Environment.NewLine + "Exit anyway and leave the target as it is?", "Owned code could not be restored", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
 					{
 						e.Cancel = true;
 						return;

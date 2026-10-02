@@ -1,4 +1,7 @@
+using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Text;
 using System.Drawing;
 using System.Text.RegularExpressions;
 using Iced.Intel;
@@ -100,20 +103,39 @@ namespace ReClassNET.UI.Debugger
 			}
 		}
 
+		/// <summary>
+		/// X offsets of each token. Each comes from measuring the whole line up to that token, because GDI adds a
+		/// little overhang to every separately measured string; summing per-token widths spreads "[rax]" apart.
+		/// </summary>
+		public static int[] Offsets(IList<AsmToken> tokens, Func<string, int> measure)
+		{
+			var offsets = new int[tokens.Count + 1];
+			int anchor = measure("x");
+			var prefix = new StringBuilder();
+			for (int i = 0; i < tokens.Count; ++i)
+			{
+				prefix.Append(tokens[i].Text);
+				// "x" after the prefix keeps trailing spaces measured; its own width is subtracted again.
+				offsets[i + 1] = Math.Max(offsets[i], measure(prefix + "x") - anchor);
+			}
+			return offsets;
+		}
+
 		/// <summary>Draws tokens left to right on one line. Returns the x after the last token.</summary>
 		public static int Draw(Graphics g, IEnumerable<AsmToken> tokens, Font font, int x, int y, int maxRight = int.MaxValue, float dim = 0f)
 		{
-			foreach (var token in tokens)
+			var list = tokens as IList<AsmToken> ?? tokens.ToList();
+			var offsets = Offsets(list, text => DebuggerTheme.Measure(text, font).Width);
+			for (int i = 0; i < list.Count; ++i)
 			{
-				var width = DebuggerTheme.Measure(token.Text, font).Width;
-				if (token.Text.Trim().Length == 0) width = DebuggerTheme.Measure("x" + token.Text + "x", font).Width - DebuggerTheme.Measure("xx", font).Width;
-				if (x + width > maxRight) { DebuggerTheme.DrawText(g, "…", font, DebuggerTheme.Muted, x, y); return x; }
+				var token = list[i];
+				if (x + offsets[i + 1] > maxRight) { DebuggerTheme.DrawText(g, "…", font, DebuggerTheme.Muted, x + offsets[i], y); return x + offsets[i]; }
+				if (token.Text.Trim().Length == 0) continue;
 				var color = ColorOf(token.Kind);
 				if (dim > 0) color = DebuggerTheme.Mix(color, DebuggerTheme.Faint, dim);
-				DebuggerTheme.DrawText(g, token.Text, font, color, x, y);
-				x += width;
+				DebuggerTheme.DrawText(g, token.Text, font, color, x + offsets[i], y);
 			}
-			return x;
+			return x + offsets[list.Count];
 		}
 	}
 }

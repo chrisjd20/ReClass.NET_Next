@@ -170,7 +170,7 @@ namespace ReClassNET.Forms
 				{
 					Dumper.DumpModule(reader, module, stream);
 
-					MessageBox.Show("Module successfully dumped.", Constants.ApplicationName, MessageBoxButtons.OK, MessageBoxIcon.Information);
+					ReClassNET.UI.ThemedMessageBox.Show("Module successfully dumped.", Constants.ApplicationName, MessageBoxButtons.OK, MessageBoxIcon.Information);
 				};
 			}
 			else
@@ -190,7 +190,7 @@ namespace ReClassNET.Forms
 				{
 					Dumper.DumpSection(reader, section, stream);
 
-					MessageBox.Show("Section successfully dumped.", Constants.ApplicationName, MessageBoxButtons.OK, MessageBoxIcon.Information);
+					ReClassNET.UI.ThemedMessageBox.Show("Section successfully dumped.", Constants.ApplicationName, MessageBoxButtons.OK, MessageBoxIcon.Information);
 				};
 			}
 

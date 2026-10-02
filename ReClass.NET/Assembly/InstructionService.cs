@@ -72,6 +72,10 @@ namespace ReClassNET.AssemblyEditing
 	{
 		public const int MaxBytes = 65536;
 
+		// Building these is costly and Decode runs on every watch hit; neither is thread-safe, so one per thread.
+		[ThreadStatic] private static NasmFormatter cachedFormatter;
+		[ThreadStatic] private static InstructionInfoFactory cachedFactory;
+
 		internal static NasmFormatter CreateFormatter()
 		{
 			var formatter = new NasmFormatter();
@@ -94,9 +98,9 @@ namespace ReClassNET.AssemblyEditing
 			var reader = new ByteArrayCodeReader(bytes);
 			var decoder = Decoder.Create(bitness, reader);
 			decoder.IP = origin;
-			var formatter = CreateFormatter();
+			var formatter = cachedFormatter ?? (cachedFormatter = CreateFormatter());
 			var output = new StringOutput();
-			var factory = new InstructionInfoFactory();
+			var factory = cachedFactory ?? (cachedFactory = new InstructionInfoFactory());
 			int offset = 0;
 			while (offset < bytes.Length)
 			{
@@ -182,9 +186,41 @@ namespace ReClassNET.AssemblyEditing
 				case Mnemonic.Cmp: text = "Compare " + destination + " with " + source + " by subtraction; update flags without storing the result."; break;
 				case Mnemonic.Test: text = "Test the bitwise AND of " + destination + " and " + source + "; update flags without storing the result."; break;
 				case Mnemonic.Nop: text = "Continue to the next instruction without changing ordinary registers or flags."; break;
+				case Mnemonic.Movzx: text = "Copy " + source + " into " + destination + ", filling the extra upper bits with zeros."; break;
+				case Mnemonic.Movsx:
+				case Mnemonic.Movsxd: text = "Copy " + source + " into " + destination + ", copying its sign bit into the extra upper bits (signed widening)."; break;
+				case Mnemonic.And: text = "Keep only the bits set in both " + destination + " and " + source + " (bitwise AND); store the result in " + destination + "."; break;
+				case Mnemonic.Or: text = "Set every bit that is set in either " + destination + " or " + source + " (bitwise OR); store the result in " + destination + "."; break;
+				case Mnemonic.Xor:
+					text = SameRegisterOperands(instruction)
+						? "Set " + destination + " to zero (XOR with itself is the usual way to clear a register)."
+						: "Flip the bits of " + destination + " wherever " + source + " has a 1 (bitwise XOR); store the result in " + destination + ".";
+					break;
+				case Mnemonic.Not: text = "Flip every bit of " + destination + " (bitwise NOT)."; break;
+				case Mnemonic.Neg: text = "Negate " + destination + " (replace it with zero minus itself)."; break;
+				case Mnemonic.Imul: text = "Multiply " + (record.Operands.Count > 1 ? destination + " by " + (record.Operands.Count > 2 ? DescribeOperand(record, 2) + " times " + source : source) : "the accumulator by " + destination) + " as signed numbers and store the result."; break;
+				case Mnemonic.Shl:
+				case Mnemonic.Sal: text = "Shift the bits of " + destination + " left by " + source + " (multiplies by a power of two)."; break;
+				case Mnemonic.Shr: text = "Shift the bits of " + destination + " right by " + source + ", filling with zeros (unsigned divide by a power of two)."; break;
+				case Mnemonic.Sar: text = "Shift the bits of " + destination + " right by " + source + ", keeping the sign (signed divide by a power of two)."; break;
+				case Mnemonic.Xchg: text = "Swap the contents of " + destination + " and " + source + "."; break;
+				case Mnemonic.Push: text = "Push " + destination + " onto the stack (the stack pointer moves down by its size)."; break;
+				case Mnemonic.Pop: text = "Pop the top of the stack into " + destination + " (the stack pointer moves up by its size)."; break;
+				case Mnemonic.Movss:
+				case Mnemonic.Movsd when !instruction.IsStringInstruction:
+				case Mnemonic.Movaps:
+				case Mnemonic.Movups:
+				case Mnemonic.Movapd:
+				case Mnemonic.Movupd:
+				case Mnemonic.Movdqa:
+				case Mnemonic.Movdqu:
+				case Mnemonic.Movd:
+				case Mnemonic.Movq: text = "Copy " + source + " into " + destination + " (a vector/floating-point register move)."; break;
 				default:
 					if (instruction.FlowControl == FlowControl.ConditionalBranch) text = "Branch to " + destination + " when the " + instruction.Mnemonic.ToString().ToLowerInvariant() + " condition is satisfied; otherwise continue to the next instruction.";
 					else if (instruction.Mnemonic == Mnemonic.Jmp) text = "Jump to " + destination + ".";
+					else if (instruction.ConditionCode != ConditionCode.None && instruction.Mnemonic.ToString().StartsWith("Cmov", StringComparison.Ordinal)) text = "Copy " + source + " into " + destination + " only when the " + instruction.ConditionCode.ToString().ToLowerInvariant() + " condition holds.";
+					else if (instruction.ConditionCode != ConditionCode.None && instruction.Mnemonic.ToString().StartsWith("Set", StringComparison.Ordinal)) text = "Set " + destination + " to 1 when the " + instruction.ConditionCode.ToString().ToLowerInvariant() + " condition holds, otherwise to 0.";
 					else if (instruction.Mnemonic == Mnemonic.Call) text = "Push the return address onto the stack and call " + destination + ".";
 					else if (instruction.Mnemonic == Mnemonic.Ret) text = "Pop the return address from the stack and return to it; adjust the stack pointer by " + instruction.StackPointerIncrement + " bytes.";
 					else { text = "Plain-language explanation unavailable."; template = false; }
@@ -204,6 +240,8 @@ namespace ReClassNET.AssemblyEditing
 			}
 			return new InstructionExplanation { Text = text, HasTemplate = template, MemoryOperands = memory, Registers = record.UsedRegisters, FlagsRead = instruction.RflagsRead, FlagsModified = instruction.RflagsModified };
 		}
+
+		private static bool SameRegisterOperands(Instruction instruction) => instruction.OpCount == 2 && instruction.GetOpKind(0) == OpKind.Register && instruction.GetOpKind(1) == OpKind.Register && instruction.GetOpRegister(0) == instruction.GetOpRegister(1);
 
 		private static string DescribeOperand(InstructionRecord record, int index)
 		{

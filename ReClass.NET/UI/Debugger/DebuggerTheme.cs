@@ -2,9 +2,7 @@ using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Linq;
-using System.Runtime.InteropServices;
 using System.Windows.Forms;
-using ReClassNET.Native;
 
 namespace ReClassNET.UI.Debugger
 {
@@ -16,28 +14,30 @@ namespace ReClassNET.UI.Debugger
 	/// </summary>
 	public static class DebuggerTheme
 	{
-		public static readonly Color Background = Color.FromArgb(0x14, 0x18, 0x1F);
-		public static readonly Color Panel = Color.FromArgb(0x1B, 0x20, 0x29);
-		public static readonly Color Raised = Color.FromArgb(0x23, 0x2A, 0x35);
-		public static readonly Color Hover = Color.FromArgb(0x2C, 0x35, 0x43);
-		public static readonly Color Border = Color.FromArgb(0x2E, 0x36, 0x44);
-		public static readonly Color Text = Color.FromArgb(0xE6, 0xEA, 0xF0);
-		public static readonly Color Muted = Color.FromArgb(0x8B, 0x95, 0xA5);
-		public static readonly Color Faint = Color.FromArgb(0x5A, 0x63, 0x72);
+		// The palette follows the application theme (UI/AppTheme.cs); painted controls read it at paint time.
+		private static ThemePalette P => AppTheme.Current;
+		public static Color Background => P.Background;
+		public static Color Panel => P.Panel;
+		public static Color Raised => P.Raised;
+		public static Color Hover => P.Hover;
+		public static Color Border => P.Border;
+		public static Color Text => P.Text;
+		public static Color Muted => P.Muted;
+		public static Color Faint => P.Faint;
 
-		public static readonly Color Teal = Color.FromArgb(0x3D, 0xD6, 0xB5);
-		public static readonly Color Amber = Color.FromArgb(0xF5, 0xB8, 0x4B);
-		public static readonly Color Red = Color.FromArgb(0xFF, 0x6B, 0x6B);
-		public static readonly Color Blue = Color.FromArgb(0x6F, 0xB3, 0xFF);
-		public static readonly Color Violet = Color.FromArgb(0xB4, 0x8C, 0xFF);
+		public static Color Teal => P.Teal;
+		public static Color Amber => P.Amber;
+		public static Color Red => P.Red;
+		public static Color Blue => P.Blue;
+		public static Color Violet => P.Violet;
 
 		// Assembly tokens.
-		public static readonly Color AsmMnemonic = Color.FromArgb(0x7C, 0xB7, 0xFF);
-		public static readonly Color AsmRegister = Color.FromArgb(0x4F, 0xE0, 0xC0);
-		public static readonly Color AsmNumber = Color.FromArgb(0xFF, 0xA8, 0x5C);
-		public static readonly Color AsmKeyword = Color.FromArgb(0xC3, 0x9B, 0xFF);
-		public static readonly Color AsmPunctuation = Color.FromArgb(0x9A, 0xA4, 0xB4);
-		public static readonly Color AsmText = Text;
+		public static Color AsmMnemonic => P.AsmMnemonic;
+		public static Color AsmRegister => P.AsmRegister;
+		public static Color AsmNumber => P.AsmNumber;
+		public static Color AsmKeyword => P.AsmKeyword;
+		public static Color AsmPunctuation => P.AsmPunctuation;
+		public static Color AsmText => P.Text;
 
 		private static Font uiFont, uiBold, uiSmall, uiSmallBold, uiTitle, mono, monoSmall, monoBold;
 
@@ -203,124 +203,22 @@ namespace ReClassNET.UI.Debugger
 			return Severity.Info;
 		}
 
-		/// <summary>Applies the dark palette to a tree of standard WinForms controls.</summary>
-		public static void Style(Control root)
-		{
-			ApplyTo(root);
-			foreach (Control child in root.Controls) Style(child);
-		}
-
-		private static void ApplyTo(Control control)
-		{
-			switch (control)
-			{
-				case DebuggerControl _:
-				case ReClassNET.Controls.Debugger.DarkButton _:
-				case ReClassNET.Controls.Debugger.ToolGroup _:
-				case ReClassNET.Controls.Debugger.Card _:
-				case ScrollableControl _ when control.GetType().Namespace == "ReClassNET.Controls.Debugger":
-					return;
-				case TextBox box:
-					box.BackColor = box.ReadOnly ? Panel : Raised;
-					box.ForeColor = Text;
-					box.BorderStyle = BorderStyle.FixedSingle;
-					break;
-				case NumericUpDown number:
-					number.BackColor = Raised;
-					number.ForeColor = Text;
-					number.BorderStyle = BorderStyle.FixedSingle;
-					break;
-				case ComboBox combo:
-					combo.BackColor = Raised;
-					combo.ForeColor = Text;
-					combo.FlatStyle = FlatStyle.Flat;
-					break;
-				case CheckBox check:
-					check.ForeColor = Text;
-					check.FlatStyle = FlatStyle.Flat;
-					check.FlatAppearance.BorderColor = Muted;
-					check.FlatAppearance.CheckedBackColor = Raised;
-					break;
-				case Button button:
-					button.FlatStyle = FlatStyle.Flat;
-					button.BackColor = Raised;
-					button.ForeColor = Text;
-					button.FlatAppearance.BorderColor = Border;
-					button.FlatAppearance.MouseOverBackColor = Hover;
-					button.FlatAppearance.MouseDownBackColor = Border;
-					break;
-				case Label label:
-					label.ForeColor = label.ForeColor == SystemColors.ControlText ? Text : label.ForeColor;
-					label.BackColor = Color.Transparent;
-					break;
-				case SplitContainer split:
-					split.BackColor = Border;
-					split.Panel1.BackColor = Background;
-					split.Panel2.BackColor = Background;
-					break;
-				case Form form:
-					form.BackColor = Background;
-					form.ForeColor = Text;
-					break;
-				case Panel _:
-					if (control.BackColor == SystemColors.Control) control.BackColor = Color.Transparent;
-					control.ForeColor = Text;
-					break;
-			}
-		}
+		/// <summary>Styles the standard WinForms controls under <paramref name="root"/> for the current theme.</summary>
+		public static void Style(Control root) => AppTheme.Style(root);
 
 		/// <summary>Styles a small modal dialog built from standard controls.</summary>
 		public static void StyleDialog(Form dialog)
 		{
-			dialog.BackColor = Background;
-			dialog.ForeColor = Text;
 			dialog.Font = UiFont;
-			Style(dialog);
-			UseDarkChrome(dialog);
+			AppTheme.Apply(dialog);
 		}
 
-		[DllImport("dwmapi.dll")]
-		private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
-
-		[DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
-		private static extern int SetWindowTheme(IntPtr hwnd, string appName, string idList);
-
-		/// <summary>
-		/// On Windows 10/11, gives the window a dark title bar and dark scroll bars. A no-op elsewhere.
-		/// </summary>
-		public static void UseDarkChrome(Form form)
-		{
-			if (NativeMethods.IsUnix()) return;
-			EventHandler apply = (s, e) =>
-			{
-				try
-				{
-					int on = 1;
-					if (DwmSetWindowAttribute(form.Handle, 20, ref on, sizeof(int)) != 0) DwmSetWindowAttribute(form.Handle, 19, ref on, sizeof(int));
-				}
-				catch (Exception) { }
-				DarkScrollBars(form);
-			};
-			if (form.IsHandleCreated) apply(form, EventArgs.Empty); else form.HandleCreated += apply;
-		}
-
-		private static void DarkScrollBars(Control root)
-		{
-			foreach (Control control in root.Controls)
-			{
-				if (control is TextBoxBase || control is DataGridView || control is ScrollBar || control is ScrollableControl)
-				{
-					var target = control;
-					EventHandler theme = (s, e) => { try { SetWindowTheme(target.Handle, "DarkMode_Explorer", null); } catch (Exception) { } };
-					if (target.IsHandleCreated) theme(target, EventArgs.Empty); else target.HandleCreated += theme;
-				}
-				DarkScrollBars(control);
-			}
-		}
+		/// <summary>Title bar and scroll bars that match the theme on Windows 10/11. A no-op elsewhere.</summary>
+		public static void UseDarkChrome(Form form) => AppTheme.SetChrome(form);
 	}
 
 	/// <summary>Base for the painted debugger controls: double buffered, dark, resize-redraw.</summary>
-	public abstract class DebuggerControl : Control
+	public abstract class DebuggerControl : Control, IPaintsOwnTheme
 	{
 		protected DebuggerControl()
 		{

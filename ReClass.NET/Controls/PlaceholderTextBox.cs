@@ -60,13 +60,26 @@ namespace ReClassNET.Controls
 			}
 		}
 
+		// Colours set later (for example by the theme) become the ones restored when the placeholder goes away.
+		protected override void OnBackColorChanged(EventArgs e)
+		{
+			backColorBackup = BackColor;
+			base.OnBackColorChanged(e);
+		}
+
+		protected override void OnForeColorChanged(EventArgs e)
+		{
+			foreColorBackup = ForeColor;
+			base.OnForeColorChanged(e);
+		}
+
 		protected override void OnPaint(PaintEventArgs e)
 		{
 			base.OnPaint(e);
 
 			if (string.IsNullOrEmpty(Text) && Focused == false)
 			{
-				using var brush = new SolidBrush(PlaceholderColor);
+				using var brush = new SolidBrush(UI.AppTheme.Current.IsDark ? UI.AppTheme.Current.Faint : PlaceholderColor);
 
 				e.Graphics.DrawString(PlaceholderText ?? string.Empty, Font, brush, new PointF(-1.0f, 1.0f));
 			}

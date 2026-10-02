@@ -82,7 +82,7 @@ namespace ReClassNET.UI
 			var sf = GlobalWindowManager.Windows.OfType<ScannerForm>().FirstOrDefault();
 			if (sf != null)
 			{
-				if (MessageBox.Show("Open a new scanner window?", Constants.ApplicationName, MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) == DialogResult.Yes)
+				if (ReClassNET.UI.ThemedMessageBox.Show("Open a new scanner window?", Constants.ApplicationName, MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) == DialogResult.Yes)
 				{
 					sf = null;
 				}

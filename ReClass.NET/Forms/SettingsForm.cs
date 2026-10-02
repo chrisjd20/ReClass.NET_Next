@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics.Contracts;
+using System.Linq;
 using System.Windows.Forms;
 using ReClassNET.Controls;
 using ReClassNET.Extensions;
@@ -41,6 +42,8 @@ namespace ReClassNET.Forms
 			SetColorBindings();
 			SetTypeDefinitionBindings();
 
+			AddThemeChooser();
+
 			if (NativeMethods.IsUnix())
 			{
 				fileAssociationGroupBox.Enabled = false;
@@ -50,6 +53,33 @@ namespace ReClassNET.Forms
 			{
 				NativeMethodsWindows.SetButtonShield(createAssociationButton, true);
 				NativeMethodsWindows.SetButtonShield(removeAssociationButton, true);
+			}
+		}
+
+		// Light (classic) or Dark. Switching applies at once to every open window and resets the memory view colours
+		// on the Colors tab to the theme's palette.
+		private void AddThemeChooser()
+		{
+			var label = new Label { Text = "Theme", AutoSize = true, Location = new System.Drawing.Point(displayGroupBox.Left + 2, 14) };
+			var chooser = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 150, Location = new System.Drawing.Point(displayGroupBox.Left + 52, 10) };
+			chooser.Items.AddRange(new object[] { "Dark", "Light (classic)" });
+			chooser.SelectedIndex = settings.Theme == ThemeKind.Dark ? 0 : 1;
+			chooser.SelectedIndexChanged += (s, e) =>
+			{
+				AppTheme.Switch(chooser.SelectedIndex == 0 ? ThemeKind.Dark : ThemeKind.Light);
+				foreach (var box in AllControls(colorsSettingTabPage).OfType<ColorBox>())
+					foreach (Binding binding in box.DataBindings) binding.ReadValue();
+			};
+			generalSettingsTabPage.Controls.Add(label);
+			generalSettingsTabPage.Controls.Add(chooser);
+		}
+
+		private static System.Collections.Generic.IEnumerable<Control> AllControls(Control root)
+		{
+			foreach (Control child in root.Controls)
+			{
+				yield return child;
+				foreach (var nested in AllControls(child)) yield return nested;
 			}
 		}
 

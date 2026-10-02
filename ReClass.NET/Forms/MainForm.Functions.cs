@@ -49,7 +49,7 @@ namespace ReClassNET.Forms
 			var info = Program.CoreFunctions.EnumerateProcesses().FirstOrDefault(p => string.Equals(p.Name, processName, StringComparison.OrdinalIgnoreCase));
 			if (info == null)
 			{
-				MessageBox.Show($"Process '{processName}' could not be found.", Constants.ApplicationName, MessageBoxButtons.OK, MessageBoxIcon.Error);
+				ReClassNET.UI.ThemedMessageBox.Show($"Process '{processName}' could not be found.", Constants.ApplicationName, MessageBoxButtons.OK, MessageBoxIcon.Error);
 
 				Program.Settings.LastProcess = string.Empty;
 			}
@@ -97,7 +97,7 @@ namespace ReClassNET.Forms
 				}
 				catch (Exception ex)
 				{
-					MessageBox.Show(ex.Message, "Project not changed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+					ReClassNET.UI.ThemedMessageBox.Show(ex.Message, "Project not changed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
 					return;
 				}
 				ClassNode.ClassCreated -= currentProject.AddClass;
@@ -568,7 +568,7 @@ namespace ReClassNET.Forms
 		{
 			if (ClassUtil.IsCyclicIfClassIsAccessibleFromParent(parent, node, CurrentProject.Classes))
 			{
-				MessageBox.Show("Invalid operation because this would create a class cycle.", "Cycle Detected", MessageBoxButtons.OK, MessageBoxIcon.Error);
+				ReClassNET.UI.ThemedMessageBox.Show("Invalid operation because this would create a class cycle.", "Cycle Detected", MessageBoxButtons.OK, MessageBoxIcon.Error);
 
 				return false;
 			}

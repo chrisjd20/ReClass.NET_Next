@@ -680,7 +680,7 @@
           "where": "reclass",
           "text": "In your ROOKIE class, right-click row 0028 → `Change Type` → `UTF8 / ASCII Text`. It reads ROOKIE: your callsign.\n\nRight-click it → `Find out what accesses this address...` (accesses, not writes: you want whoever reads your name). Accept the debugger prompt if asked.",
           "show": "0028 ... 'ROOKIE'   <- your callsign, 8 bytes",
-          "see": "Rows appear straight away and their counts climb every frame: that's the game drawing your name. Ignore those."
+          "see": "Rows appear straight away and their counts climb every frame: that's the game drawing your name. Ignore those. While this watch runs the game stutters a little: every read of your name briefly stops it. You'll stop the watch in step 6."
         },
         {
           "where": "game",

@@ -19,6 +19,7 @@ namespace ReClassNET.Util
 			EnsureSettingsDirectoryAvailable();
 
 			var settings = new Settings();
+			bool fileRead = false, themeStored = false;
 
 			try
 			{
@@ -28,6 +29,7 @@ namespace ReClassNET.Util
 
 				var document = XDocument.Load(sr);
 				var root = document.Root;
+				fileRead = root != null;
 
 				var general = root?.Element(XmlGeneralElement);
 				if (general != null)
@@ -36,6 +38,10 @@ namespace ReClassNET.Util
 					XElementSerializer.TryRead(general, nameof(settings.StayOnTop), e => settings.StayOnTop = XElementSerializer.ToBool(e));
 					XElementSerializer.TryRead(general, nameof(settings.RunAsAdmin), e => settings.RunAsAdmin = XElementSerializer.ToBool(e));
 					XElementSerializer.TryRead(general, nameof(settings.RandomizeWindowTitle), e => settings.RandomizeWindowTitle = XElementSerializer.ToBool(e));
+					XElementSerializer.TryRead(general, nameof(settings.Theme), e =>
+					{
+						if (System.Enum.TryParse(XElementSerializer.ToString(e), out ThemeKind theme)) { settings.Theme = theme; themeStored = true; }
+					});
 				}
 				var display = root?.Element(XmlDisplayElement);
 				if (display != null)
@@ -68,6 +74,7 @@ namespace ReClassNET.Util
 					XElementSerializer.TryRead(colors, nameof(settings.CommentColor), e => settings.CommentColor = XElementSerializer.ToColor(e));
 					XElementSerializer.TryRead(colors, nameof(settings.TextColor), e => settings.TextColor = XElementSerializer.ToColor(e));
 					XElementSerializer.TryRead(colors, nameof(settings.VTableColor), e => settings.VTableColor = XElementSerializer.ToColor(e));
+					XElementSerializer.TryRead(colors, nameof(settings.PluginColor), e => settings.PluginColor = XElementSerializer.ToColor(e));
 				}
 				var customData = root?.Element(XmlCustomDataElement);
 				if (customData != null)
@@ -79,6 +86,8 @@ namespace ReClassNET.Util
 			{
 				// ignored
 			}
+
+			UI.AppTheme.ResolveLoadedTheme(settings, fileRead, themeStored);
 
 			return settings;
 		}
@@ -107,7 +116,8 @@ namespace ReClassNET.Util
 						XElementSerializer.ToXml(nameof(settings.LastProcess), settings.LastProcess),
 						XElementSerializer.ToXml(nameof(settings.StayOnTop), settings.StayOnTop),
 						XElementSerializer.ToXml(nameof(settings.RunAsAdmin), settings.RunAsAdmin),
-						XElementSerializer.ToXml(nameof(settings.RandomizeWindowTitle), settings.RandomizeWindowTitle)
+						XElementSerializer.ToXml(nameof(settings.RandomizeWindowTitle), settings.RandomizeWindowTitle),
+						XElementSerializer.ToXml(nameof(settings.Theme), settings.Theme.ToString())
 					),
 					new XElement(
 						XmlDisplayElement,
@@ -137,7 +147,8 @@ namespace ReClassNET.Util
 						XElementSerializer.ToXml(nameof(settings.IndexColor), settings.IndexColor),
 						XElementSerializer.ToXml(nameof(settings.CommentColor), settings.CommentColor),
 						XElementSerializer.ToXml(nameof(settings.TextColor), settings.TextColor),
-						XElementSerializer.ToXml(nameof(settings.VTableColor), settings.VTableColor)
+						XElementSerializer.ToXml(nameof(settings.VTableColor), settings.VTableColor),
+						XElementSerializer.ToXml(nameof(settings.PluginColor), settings.PluginColor)
 					),
 					settings.CustomData.Serialize(XmlCustomDataElement)
 				)

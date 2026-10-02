@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text;
 using System.Windows.Forms;
 using ReClassNET.AssemblyEditing;
+using ReClassNET.UI;
 using ReClassNET.UI.Debugger;
 
 namespace ReClassNET.Controls.Debugger
@@ -14,7 +15,7 @@ namespace ReClassNET.Controls.Debugger
 	/// Base for painted views that scroll vertically. It manages its own scroll bar rather than AutoScroll, which
 	/// throws under Mono when a hidden view is resized.
 	/// </summary>
-	public abstract class ScrollingView : Control
+	public abstract class ScrollingView : Control, IPaintsOwnTheme
 	{
 		private readonly VScrollBar bar = new VScrollBar { Dock = DockStyle.Right, Visible = false };
 		private string emptyText = "";

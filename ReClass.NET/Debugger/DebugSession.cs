@@ -21,7 +21,9 @@ namespace ReClassNET.Debugger
         public DateTime Timestamp {get;internal set;}
         public AdvancedContext Context {get;internal set;}
         public SnapshotPhase Phase {get;internal set;}
-        public IDictionary<string,ulong> Registers => Context.Registers();
+        private IDictionary<string,ulong> registers;
+        // Built once per snapshot: conditions, the watch window and the editor all read it.
+        public IDictionary<string,ulong> Registers => registers??(registers=Context.Registers());
     }
     public sealed class WatchHit
     {
@@ -79,12 +81,16 @@ namespace ReClassNET.Debugger
         private volatile bool shutdown;
         private long eventId;
         private int stopDepth,pauseDispatchDepth;
-        private bool leaseWasRunning,userPaused,recoveryRequired;
+        private bool leaseWasRunning,recoveryRequired;
+        private volatile bool userPaused;
         private string recoveryReason;
         private AdvancedEvent pending;
         private bool handledPending=true;
         private bool nativeAttached;
         public DebugSessionState State {get;private set;}=DebugSessionState.Detached;
+        // True only for a pause someone asked for (Pause, Step, Trace, Pause on match, an error). The session is
+        // also briefly Paused while it handles each event; windows should not show that as "paused".
+        public bool HeldPaused=>userPaused;
         public Guid Id {get;}=Guid.NewGuid();
         public ulong ProcessId {get;}
         public ulong ProcessCreationMarker {get;private set;}
@@ -108,7 +114,7 @@ namespace ReClassNET.Debugger
         private void SetState(DebugSessionState state)
         {
             State=state;
-            if(state==DebugSessionState.Exited){watches.Clear();Array.Clear(slots,0,4);knownEntries.Clear();}
+            if(state==DebugSessionState.Exited){watches.Clear();Array.Clear(slots,0,4);knownEntries.Clear();candidateCache.Clear();}
             var subscribers=StateChanged;
             if(subscribers!=null)foreach(Action<DebugSessionState> handler in subscribers.GetInvocationList())
                 try{handler(state);}catch(Exception error){System.Diagnostics.Debug.WriteLine(error.Message);}
@@ -380,6 +386,7 @@ namespace ReClassNET.Debugger
         private bool IsOwned(AdvancedEvent evt)=>evt.Kind==AdvancedEventKind.Attached||evt.Kind==AdvancedEventKind.Pause||evt.Kind==AdvancedEventKind.ThreadCreated||evt.Kind==AdvancedEventKind.ThreadExited||evt.Kind==AdvancedEventKind.ProcessExited||evt.Kind==AdvancedEventKind.ModuleChanged;
         private void HandleEvent(AdvancedEvent evt)
         {
+            if(TryFastDataHit(evt))return;
             pending=evt;handledPending=IsOwned(evt);SetState(DebugSessionState.Paused);
             if(evt.Kind==AdvancedEventKind.ModuleChanged)HandleModuleChange(evt);
             if(evt.Kind==AdvancedEventKind.ProcessExited||evt.Kind==AdvancedEventKind.Exec)
@@ -397,7 +404,62 @@ namespace ReClassNET.Debugger
             if(execution!=null){handledPending=true;HandleExecution(execution,evt);return;}
             if(pauseDispatchDepth==0&&!userPaused&&!recoveryRequired){Native(AdvancedOperation.Continue,flags:handledPending?1U:0U);SetState(DebugSessionState.Running);}
         }
+        // A hit that only feeds data watches with no condition and no Pause on match lets the target run on
+        // straight away: its registers were captured with the event, and the bookkeeping below needs only memory
+        // reads. The state never leaves Running, so windows don't flicker to Paused on every hit.
+        private bool TryFastDataHit(AdvancedEvent evt)
+        {
+            if(evt.Kind!=AdvancedEventKind.Breakpoint||evt.CausedBy==0||pauseDispatchDepth!=0||userPaused||recoveryRequired||State!=DebugSessionState.Running)return false;
+            if(watches.Values.Any(w=>w.Software&&w.Address==evt.Address))return false;
+            var triggered=Enumerable.Range(0,4).Where(i=>(evt.CausedBy&(1U<<i))!=0&&slots[i]!=null).Select(i=>slots[i]).Distinct().ToArray();
+            if(triggered.Length==0||triggered.Any(w=>w.Execution||w.PauseWhenMatched||!string.IsNullOrWhiteSpace(w.ConditionText)))return false;
+            pending=evt;handledPending=true;
+            Native(AdvancedOperation.Continue,flags:1U);
+            foreach(var watch in triggered)CaptureDataWatch(watch,evt);
+            return true;
+        }
+        private sealed class CachedCandidates
+        {
+            public byte[] Window;
+            public InstructionRecord[] Candidates;
+        }
+        // Decoded candidates per RIP. Reused only while the 15 bytes before RIP are unchanged, so patches, hooks
+        // and edits made by any tool are always seen.
+        private readonly Dictionary<ulong,CachedCandidates> candidateCache=new Dictionary<ulong,CachedCandidates>();
         private InstructionRecord[] PreviousCandidates(ulong rip)
+        {
+            int span=(int)Math.Min(15UL,rip);
+            if(span==0)return new InstructionRecord[0];
+            ulong start=rip-(ulong)span;
+            byte[] window;
+            try{window=ReadExact(start,span);}
+            catch{return PreviousCandidatesByLength(rip);}
+            // Our own INT3 bytes are not part of the real instruction stream.
+            foreach(var breakpoint in watches.Values.Where(w=>w.Software&&w.Address>=start&&w.Address<rip))
+            {
+                int index=(int)(breakpoint.Address-start);
+                if(window[index]==0xcc)window[index]=breakpoint.Original;
+            }
+            CachedCandidates cached;
+            if(candidateCache.TryGetValue(rip,out cached)&&cached.Window.SequenceEqual(window))return cached.Candidates;
+            var result=new List<InstructionRecord>();
+            for(int n=1;n<=span;n++)
+            {
+                try
+                {
+                    var bytes=new byte[n];Buffer.BlockCopy(window,span-n,bytes,0,n);
+                    var decoded=instructions.Decode(bytes,rip-(ulong)n);
+                    if(decoded.Success&&decoded.Instructions.Count==1&&decoded.Instructions[0].Length==n)result.Add(decoded.Instructions[0]);
+                }
+                catch{ }
+            }
+            if(candidateCache.Count>=4096)candidateCache.Clear();
+            var candidates=result.ToArray();
+            candidateCache[rip]=new CachedCandidates{Window=window,Candidates=candidates};
+            return candidates;
+        }
+        // Fallback when the 15 bytes before RIP can't be read in one go (for example across an unmapped page).
+        private InstructionRecord[] PreviousCandidatesByLength(ulong rip)
         {
             var result=new List<InstructionRecord>();
             for(int n=1;n<=15&&rip>=(ulong)n;n++)

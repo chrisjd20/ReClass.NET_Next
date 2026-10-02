@@ -65,7 +65,7 @@ namespace ReClassNET.Forms
 				row.SubItems.Add(current != null ? (workspace.Target.IsAlive ? current.Status.ToString() : "TargetExited") : resolution?.Item1 ?? "Inactive"); row.SubItems.Add(definition.Mode.ToString());
 				row.SubItems.Add(definition.LocatorKind == PatchLocatorKind.SessionAddress ? "Session-only draft" : definition.ModuleName + (definition.LocatorKind == PatchLocatorKind.ModuleOffset ? "+0x" + definition.Offset.ToString("X") : " pattern"));
 				row.SubItems.Add(definition.SelectionLength.ToString()); row.SubItems.Add(current?.Message ?? resolution?.Item2 ?? (definition.LocatorKind == PatchLocatorKind.SessionAddress ? "Choose an explicit origin after reopening a project." : "Requires matching image SHA-256 and original bytes."));
-				if (current != null) row.ForeColor = current.Status == PatchStatus.Active ? Color.DarkGreen : Color.DarkRed;
+				if (current != null) row.ForeColor = current.Status == PatchStatus.Active ? UI.AppTheme.Current.Good : UI.AppTheme.Current.Bad;
 				list.Items.Add(row); if (selected == definition.Id) row.Selected = true;
 			}
 			list.EndUpdate(); UpdateButtons();
@@ -149,13 +149,14 @@ namespace ReClassNET.Forms
 		{
 			using (var dialog = new Form { Text = "Patch conflict", Size = new Size(620, 260), StartPosition = FormStartPosition.CenterParent, FormBorderStyle = FormBorderStyle.FixedDialog, MinimizeBox = false, MaximizeBox = false, ShowInTaskbar = false })
 			{
-				var text = new TextBox { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, BorderStyle = BorderStyle.None, BackColor = SystemColors.Control, Text = message + Environment.NewLine + Environment.NewLine + "Force restore original bytes overwrites whatever is there now with the saved originals. Abandon ownership (leave bytes as they are) keeps the current bytes and stops tracking the patch." };
+				var text = new TextBox { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, BorderStyle = BorderStyle.None, Text = message + Environment.NewLine + Environment.NewLine + "Force restore original bytes overwrites whatever is there now with the saved originals. Abandon ownership (leave bytes as they are) keeps the current bytes and stops tracking the patch." };
 				var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, FlowDirection = FlowDirection.RightToLeft, Height = 40, Padding = new Padding(4) };
 				var cancel = new Button { Text = "Cancel", AutoSize = true, DialogResult = DialogResult.Cancel };
 				var abandon = new Button { Text = "Abandon ownership (leave bytes as they are)", AutoSize = true, DialogResult = DialogResult.No };
 				var force = new Button { Text = "Force restore original bytes", AutoSize = true, DialogResult = DialogResult.Yes };
 				buttons.Controls.AddRange(new Control[] { cancel, abandon, force });
 				dialog.Controls.Add(text); dialog.Controls.Add(buttons); dialog.CancelButton = cancel; dialog.Padding = new Padding(8);
+				UI.AppTheme.Apply(dialog);
 				var answer = dialog.ShowDialog(owner);
 				return answer == DialogResult.Yes ? PatchConflictChoice.ForceRestore : answer == DialogResult.No ? PatchConflictChoice.Abandon : PatchConflictChoice.Cancel;
 			}

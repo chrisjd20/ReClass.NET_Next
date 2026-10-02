@@ -68,7 +68,7 @@ namespace ReClassNET.Debugger
 				if (size > 32)
 				{
 					// Four debug registers cover at most 4 x 8 aligned bytes.
-					if (System.Windows.Forms.MessageBox.Show($"The selected value is {size} bytes, but a hardware watch covers at most 32 bytes (four 8-byte debug registers).\n\nWatch the first 8 bytes at 0x{address.ToInt64():X} instead?\n\nTip: select a single field inside the structure to watch exactly that field.", "Watch too large", System.Windows.Forms.MessageBoxButtons.YesNo, System.Windows.Forms.MessageBoxIcon.Information) != System.Windows.Forms.DialogResult.Yes)
+					if (ReClassNET.UI.ThemedMessageBox.Show($"The selected value is {size} bytes, but a hardware watch covers at most 32 bytes (four 8-byte debug registers).\n\nWatch the first 8 bytes at 0x{address.ToInt64():X} instead?\n\nTip: select a single field inside the structure to watch exactly that field.", "Watch too large", System.Windows.Forms.MessageBoxButtons.YesNo, System.Windows.Forms.MessageBoxIcon.Information) != System.Windows.Forms.DialogResult.Yes)
 					{
 						return;
 					}

@@ -4,6 +4,12 @@ using ReClassNET.Util;
 
 namespace ReClassNET
 {
+	public enum ThemeKind
+	{
+		Light,
+		Dark
+	}
+
 	public class Settings
 	{
 		// Application Settings
@@ -15,6 +21,9 @@ namespace ReClassNET
 		public bool RunAsAdmin { get; set; } = false;
 
 		public bool RandomizeWindowTitle { get; set; } = false;
+
+		/// <summary>Light (classic) or Dark. See UI/AppTheme.cs.</summary>
+		public ThemeKind Theme { get; set; } = ThemeKind.Dark;
 
 		// Node Drawing Settings
 

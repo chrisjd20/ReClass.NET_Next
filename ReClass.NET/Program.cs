@@ -68,6 +68,9 @@ namespace ReClassNET
 			Settings = SettingsSerializer.Load();
 			Logger = new GuiLogger();
 
+			// Context menus, drop-downs and status bars follow the Light/Dark theme too.
+			ToolStripManager.Renderer = new CustomToolStripProfessionalRenderer(true, true);
+
 			if (!NativeMethods.IsUnix() && Settings.RunAsAdmin && !WinUtil.IsAdministrator)
 			{
 				WinUtil.RunElevated(Process.GetCurrentProcess().MainModule?.FileName, args.Length > 0 ? string.Join(" ", args) : null);
@@ -104,6 +107,12 @@ namespace ReClassNET
 		public static void ShowException(Exception ex)
 		{
 			ex.HelpLink = Constants.HelpUrl;
+
+			if (AppTheme.Current.IsDark)
+			{
+				ThemedMessageBox.ShowException(null, ex);
+				return;
+			}
 
 			var msg = new ExceptionMessageBox(ex)
 			{
