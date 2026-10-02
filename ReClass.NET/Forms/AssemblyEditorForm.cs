@@ -76,8 +76,11 @@ namespace ReClassNET.Forms
 		private ulong loadedAddress;
 		private int loadedLength;
 		private long editVersion;
-		private bool syncing, busy, closingAfterCleanup, closeRequested, restored;
+		private bool syncing, busy, closingAfterCleanup, closeRequested, restored, converting, endedShown, cleanupFailed;
 		private TableLayoutPanel layout;
+		// Divider positions the user dragged to, kept for the next editor window in this session.
+		private static float[] savedRows, savedColumns;
+		private static int savedCapturedWidth;
 
 		// Also called by AppTheme on a live Light/Dark switch.
 		public void ApplyTheme()
@@ -103,10 +106,13 @@ namespace ReClassNET.Forms
 			header.Icon = Resources.B32x32_Page_Code; header.Title = "Instruction editor";
 			header.Subtitle = address == 0 ? "Enter a code address, then Load selection." : "0x" + address.ToString("X");
 
-			var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 7, Padding = new Padding(DpiUtil.ScaleIntX(8), DpiUtil.ScaleIntY(4), DpiUtil.ScaleIntX(8), DpiUtil.ScaleIntY(4)), BackColor = DebuggerTheme.Background };
-			layout.RowStyles.Add(new RowStyle(SizeType.AutoSize)); layout.RowStyles.Add(new RowStyle(SizeType.Percent, 31));
-			layout.RowStyles.Add(new RowStyle(SizeType.Percent, 25)); layout.RowStyles.Add(new RowStyle(SizeType.Absolute, DpiUtil.ScaleIntY(34)));
+			// Rows: top fields, original selection, divider, editors, size meter, options, divider, preview, actions.
+			// The dividers trade height between the nearest resizable areas above and below them.
+			var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 9, Padding = new Padding(DpiUtil.ScaleIntX(8), DpiUtil.ScaleIntY(4), DpiUtil.ScaleIntX(8), DpiUtil.ScaleIntY(4)), BackColor = DebuggerTheme.Background };
 			layout.RowStyles.Add(new RowStyle(SizeType.AutoSize)); layout.RowStyles.Add(new RowStyle(SizeType.Percent, 44));
+			layout.RowStyles.Add(new RowStyle(SizeType.Absolute, DpiUtil.ScaleIntY(8))); layout.RowStyles.Add(new RowStyle(SizeType.Percent, 20));
+			layout.RowStyles.Add(new RowStyle(SizeType.Absolute, DpiUtil.ScaleIntY(34))); layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+			layout.RowStyles.Add(new RowStyle(SizeType.Absolute, DpiUtil.ScaleIntY(8))); layout.RowStyles.Add(new RowStyle(SizeType.Percent, 36));
 			layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
 			var top = Flow(); top.Controls.AddRange(new Control[] { Caption("Code address (hex or module+offset)"), addressBox, Caption("Selected bytes"), lengthBox, loadButton, Caption("Name"), nameBox });
@@ -115,24 +121,34 @@ namespace ReClassNET.Forms
 			var originalCard = new Card("Original selection, operands and captured registers");
 			var registersToggle = new ToggleChip("Registers", snapshot != null); var rawToggle = new ToggleChip("Raw");
 			originalCard.HeaderRight.Controls.Add(registersToggle); originalCard.HeaderRight.Controls.Add(rawToggle);
-			var capturedHost = new Panel { Dock = DockStyle.Right, Width = DpiUtil.ScaleIntX(440), Padding = new Padding(DpiUtil.ScaleIntX(8), 0, 0, 0), BackColor = DebuggerTheme.Panel, Visible = snapshot != null };
+			var capturedHost = new Panel { Dock = DockStyle.Right, Width = savedCapturedWidth > 0 ? savedCapturedWidth : DpiUtil.ScaleIntX(440), BackColor = DebuggerTheme.Panel, Visible = snapshot != null };
 			capturedHost.Controls.Add(capturedBoard);
+			var capturedGrip = new GripBar(Orientation.Vertical) { Dock = DockStyle.Right, Visible = snapshot != null, BackColor = DebuggerTheme.Panel };
+			capturedGrip.ResizeDocked(capturedHost, DpiUtil.ScaleIntX(220));
+			capturedGrip.DragFinished += () => savedCapturedWidth = capturedHost.Width;
 			originalBox.Visible = false;
-			originalCard.Body.Controls.Add(originalList); originalCard.Body.Controls.Add(originalBox); originalCard.Body.Controls.Add(capturedHost);
-			registersToggle.CheckedChanged += (s, e) => capturedHost.Visible = registersToggle.Checked;
+			// Docking runs from the last control added, so the captured panel takes the right edge and the divider sits beside it.
+			originalCard.Body.Controls.Add(originalList); originalCard.Body.Controls.Add(originalBox); originalCard.Body.Controls.Add(capturedGrip); originalCard.Body.Controls.Add(capturedHost);
+			registersToggle.CheckedChanged += (s, e) => capturedHost.Visible = capturedGrip.Visible = registersToggle.Checked;
 			rawToggle.CheckedChanged += (s, e) => { originalBox.Visible = rawToggle.Checked; originalList.Visible = !rawToggle.Checked; if (rawToggle.Checked) originalBox.BringToFront(); };
 			originalList.EmptyText = "Load selection decodes the original bytes here, one instruction per line, each explained in plain English.";
 			capturedBoard.EmptyText = "No registers were captured for this instruction.";
 			capturedBoard.FollowRequested += register => _ = RunAsync(() => FollowPointerAsync(register.Value));
 			layout.Controls.Add(originalCard, 0, 1);
 
-			var editors = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty, BackColor = DebuggerTheme.Background };
-			editors.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58)); editors.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42));
-			editors.Controls.Add(EditorCard("Assembly (NASM, 64-bit)", assemblyBox, assemblyNote), 0, 0); editors.Controls.Add(EditorCard("Replacement hex bytes", hexBox, hexNote), 1, 0);
-			layout.Controls.Add(editors, 0, 2);
+			layout.Controls.Add(RowGrip(layout), 0, 2);
+
+			var editors = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, Margin = Padding.Empty, BackColor = DebuggerTheme.Background };
+			editors.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58)); editors.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, DpiUtil.ScaleIntX(8))); editors.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42));
+			var columnGrip = new GripBar(Orientation.Vertical) { Dock = DockStyle.Fill };
+			columnGrip.ResizeTable(editors, DpiUtil.ScaleIntX(220));
+			columnGrip.DragFinished += () => savedColumns = GripBar.Percents(editors, false);
+			editors.Controls.Add(EditorCard("Assembly (NASM, 64-bit)", assemblyBox, assemblyNote), 0, 0); editors.Controls.Add(columnGrip, 1, 0); editors.Controls.Add(EditorCard("Replacement hex bytes", hexBox, hexNote), 2, 0);
+			GripBar.SetPercents(editors, false, savedColumns);
+			layout.Controls.Add(editors, 0, 3);
 			sizeMeter.Margin = new Padding(DpiUtil.ScaleIntX(6), 0, DpiUtil.ScaleIntX(6), 0);
 			sizeMeter.SwitchToHookRequested += (s, e) => { if (modeBox.Enabled) modeBox.SelectedValue = PatchMode.Hook; };
-			layout.Controls.Add(sizeMeter, 0, 3);
+			layout.Controls.Add(sizeMeter, 0, 4);
 
 			var options = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = true, BackColor = DebuggerTheme.Background, Margin = Padding.Empty };
 			options.Controls.Add(OptionGroup("Patch mode", modeHelp, modeBox));
@@ -141,17 +157,19 @@ namespace ReClassNET.Forms
 			options.Controls.Add(OptionGroup("Saved locator", locatorHelp, locatorBox, patternFields));
 			moduleLabel.ForeColor = DebuggerTheme.Muted; moduleLabel.Margin = new Padding(DpiUtil.ScaleIntX(10), DpiUtil.ScaleIntY(4), 0, DpiUtil.ScaleIntY(4));
 			options.Controls.Add(moduleLabel); options.SetFlowBreak(options.Controls[options.Controls.Count - 2], true);
-			layout.Controls.Add(options, 0, 4);
+			layout.Controls.Add(options, 0, 5);
+			layout.Controls.Add(RowGrip(layout), 0, 6);
 
 			var previewCard = new Card("Change preview");
 			var detailsToggle = new ToggleChip("Details"); previewCard.HeaderRight.Controls.Add(detailsToggle);
 			previewBox.Visible = false;
 			previewCard.Body.Controls.Add(diffView); previewCard.Body.Controls.Add(previewBox);
 			detailsToggle.CheckedChanged += (s, e) => { previewBox.Visible = detailsToggle.Checked; diffView.Visible = !detailsToggle.Checked; if (detailsToggle.Checked) previewBox.BringToFront(); };
-			layout.Controls.Add(previewCard, 0, 5);
+			layout.Controls.Add(previewCard, 0, 7);
 
 			var actions = Flow(); actions.Controls.AddRange(new Control[] { previewButton, prepareButton, cancelButton, applyButton, restoreButton, nopButton, saveButton, Spacer(), followRegisterButton, followOperandButton, reverseButton });
-			layout.Controls.Add(actions, 0, 6);
+			layout.Controls.Add(actions, 0, 8);
+			GripBar.SetPercents(layout, true, savedRows);
 			Controls.Add(layout); Controls.Add(status); Controls.Add(rail); Controls.Add(header);
 			this.layout = layout; ApplyTheme();
 			addressBox.Font = patternBox.Font = entryOffsetBox.Font = DebuggerTheme.Mono;
@@ -183,7 +201,7 @@ namespace ReClassNET.Forms
 			followOperandButton.Click += async (s, e) => await RunAsync(FollowOperandAsync);
 			reverseButton.Click += async (s, e) => await RunAsync(async () => { await CancelPreparationAsync(); new WatchFinderForm(workspace, Address(), 1, false, true).Show(this); });
 			nopButton.Click += (s, e) => { if (originals == null) return; modeBox.SelectedValue = PatchMode.InPlace; hexBox.Text = AssemblyService.FormatHex(Enumerable.Repeat((byte)0x90, originals.Length).ToArray()); authoritative = PatchSourceKind.Bytes; };
-			workspace.Manager.Changed += ManagerChanged; workspace.Session.StateChanged += SessionChanged;
+			workspace.Manager.Changed += ManagerChanged; workspace.Session.StateChanged += SessionChanged; workspace.Ended += WorkspaceEnded;
 			Shown += async (s, e) =>
 			{
 				await Task.Yield();
@@ -197,6 +215,13 @@ namespace ReClassNET.Forms
 			UpdateButtons();
 		}
 
+		private static GripBar RowGrip(TableLayoutPanel layout)
+		{
+			var grip = new GripBar(Orientation.Horizontal) { Dock = DockStyle.Fill };
+			grip.ResizeTable(layout, DpiUtil.ScaleIntY(100));
+			grip.DragFinished += () => savedRows = GripBar.Percents(layout, true);
+			return grip;
+		}
 		private static TextBox MakeCodeBox(bool readOnly) => new TextBox { AutoSize = false, Multiline = true, ScrollBars = readOnly ? ScrollBars.Both : ScrollBars.Vertical, WordWrap = false, ReadOnly = readOnly, AcceptsTab = !readOnly, MaxLength = 262144, Font = DebuggerTheme.Mono, Dock = DockStyle.Fill };
 		private static Label Caption(string text) => new Label { Text = text, AutoSize = true, ForeColor = DebuggerTheme.Muted, Margin = new Padding(DpiUtil.ScaleIntX(6), DpiUtil.ScaleIntY(9), DpiUtil.ScaleIntX(2), 0) };
 		private static Label Help() => new Label { AutoSize = true, ForeColor = DebuggerTheme.Muted, MaximumSize = new Size(DpiUtil.ScaleIntX(320), 0), Padding = new Padding(0, 0, DpiUtil.ScaleIntX(8), 0), Margin = new Padding(DpiUtil.ScaleIntX(4), DpiUtil.ScaleIntY(4), 0, 0) };
@@ -252,6 +277,7 @@ namespace ReClassNET.Forms
 		}
 		private async Task ConvertAsync()
 		{
+			converting = true;
 			conversion?.Cancel(); conversion?.Dispose(); conversion = new CancellationTokenSource(); var token = conversion.Token; long version = editVersion;
 			try
 			{
@@ -278,7 +304,7 @@ namespace ReClassNET.Forms
 				}
 			}
 			catch (Exception ex) { if (!IsDisposed && version == editVersion) status.Text = ex.Message; }
-			finally { syncing = false; UpdateSizeMeter(); UpdateButtons(); }
+			finally { converting = false; syncing = false; UpdateSizeMeter(); UpdateButtons(); }
 		}
 
 		private async Task LoadSelectionAsync(bool initial)
@@ -329,7 +355,7 @@ namespace ReClassNET.Forms
 			if (snapshot != null)
 			{
 				var used = decoded.Instructions.SelectMany(i => i.UsedRegisters).Where(r => r.Register != Iced.Intel.Register.None).Select(r => Iced.Intel.RegisterExtensions.GetFullRegister(r.Register).ToString().ToLowerInvariant());
-				capturedBoard.SetRegisters(RegisterHighlights.Build(snapshot.Registers, used, 0, 0, null), "CAPTURED " + snapshot.Phase.ToString().ToUpperInvariant() + " · THREAD " + snapshot.ThreadId + " · CLICK TO FOLLOW");
+				capturedBoard.SetRegisters(RegisterHighlights.Build(snapshot.Registers, used, 0, 0, null, workspace.LooksLikeAddress), "CAPTURED " + snapshot.Phase.ToString().ToUpperInvariant() + " · THREAD " + snapshot.ThreadId + " · CLICK AN ADDRESS TO FOLLOW");
 			}
 			var module = await Task.Run(() => workspace.Target.Modules.SingleOrDefault(m => address >= m.BaseAddress && address - m.BaseAddress < m.Size));
 			moduleLabel.Text = module == null ? "No module at this address; session-only draft." : "Module: " + module.Name + ", offset 0x" + (address - module.BaseAddress).ToString("X") + ", SHA-256 " + (module.Sha256 ?? "unavailable");
@@ -403,6 +429,7 @@ namespace ReClassNET.Forms
 				var model = new ByteDiffView.HookModel
 				{
 					Site = prepared.Preview.Address, Allocation = prepared.Allocation.Address, ReturnAddress = prepared.ReturnAddress, EntryBytes = prepared.EntryBytes,
+					SelectionEnd = prepared.Preview.Address + (ulong)prepared.Preview.Definition.SelectionLength,
 					Semantics = semanticBox.Options().FirstOrDefault(o => Equals(o.Value, prepared.Preview.Definition.HookMode))?.Label ?? prepared.Preview.Definition.HookMode.ToString(),
 					YourCode = prepared.UserBodyInstructions.Select(i => new ListedInstruction { Address = i.Address, Bytes = i.Bytes, Tokens = AsmTokens.Tokenize(i), Text = i.Text }).ToList(),
 					Displaced = prepared.DisplacedInstructions.Select(i => new ListedInstruction { Address = i.Address, Bytes = i.Bytes, Tokens = AsmTokens.Tokenize(i), Text = i.Text }).ToList()
@@ -466,9 +493,9 @@ namespace ReClassNET.Forms
 		}
 		private async Task FollowPointerAsync(ulong pointer)
 		{
-			if (snapshot == null || snapshot.SessionId != workspace.Session.Id) throw new InvalidOperationException("The captured register snapshot belongs to a different process session.");
-			if (pointer == 0) throw new InvalidOperationException("The captured address is zero.");
-			await Task.Run(() => workspace.Target.ReadExact(pointer, 1));
+			if (snapshot == null || snapshot.SessionId != workspace.Session.Id || workspace.SessionEnded) throw new InvalidOperationException("This capture belongs to a game session that has ended, so its memory can't be opened.");
+			if (pointer == 0) throw new InvalidOperationException("The value is 0, so there is no memory to open.");
+			if (!await Task.Run(() => workspace.LooksLikeAddress(pointer))) throw new InvalidOperationException("0x" + pointer.ToString("X") + " (" + pointer.ToString("N0", CultureInfo.InvariantCulture) + " in decimal) isn't an address in the game's memory, so there is nothing to open. It is probably a plain number.");
 			LinkedWindowFeatures.CreateClassAtAddress(new IntPtr(unchecked((long)pointer)), true);
 			status.Text = "Following captured address 0x" + pointer.ToString("X") + ". The displayed memory is current and may differ from the captured event.";
 		}
@@ -502,8 +529,11 @@ namespace ReClassNET.Forms
 		}
 		private async Task RunAsync(Func<Task> action)
 		{
-			if (busy || IsDisposed) return; if (!ReferenceEquals(repository, workspace.Repository)) { status.Text = "The project changed. Open a new editor for the current project."; return; } busy = true; debounce.Stop(); conversion?.Cancel(); operation = new CancellationTokenSource(); UpdateButtons();
-			try { await action(); } catch (OperationCanceledException) { if (!IsDisposed) status.Text = "Operation cancelled."; } catch (Exception ex) { if (!IsDisposed) status.Text = ex.Message; }
+			if (busy || IsDisposed) return; if (!ReferenceEquals(repository, workspace.Repository)) { status.Text = "The project changed. Open a new editor for the current project."; return; }
+			// An edit still waiting to be assembled or decoded is finished first, so the panes never show stale text.
+			bool stale = debounce.Enabled || converting;
+			busy = true; debounce.Stop(); conversion?.Cancel(); operation = new CancellationTokenSource(); UpdateButtons();
+			try { if (stale) await ConvertAsync(); await action(); } catch (OperationCanceledException) { if (!IsDisposed) status.Text = "Operation cancelled."; } catch (Exception ex) { if (!IsDisposed) status.Text = ex.Message; }
 			finally { operation.Dispose(); operation = null; busy = false; if (!IsDisposed) { UpdateButtons(); if (closeRequested) { closeRequested = false; BeginInvoke(new Action(Close)); } } }
 		}
 		private int ReplacementLength() { try { return AssemblyService.ParseHex(hexBox.Text).Length; } catch (Exception) { return -1; } }
@@ -513,13 +543,16 @@ namespace ReClassNET.Forms
 			if (!busy && prepared != null && !ReferenceEquals(workspace.Manager.Preparation, prepared)) {
 				prepared = null; preview = null; status.Text = "Hook preparation is no longer current. Prepare it again before applying.";
 			}
-			bool editable = !busy && workspace.Target.IsAlive;
+			// An editor left open after its game exited (or after ReClass attached to a new one) can only be closed.
+			bool ended = workspace.Session.IsDisposed;
+			if (ended && !endedShown) { endedShown = true; status.Text = "This editor belongs to a game session that has ended. Close it and open a new one from the running game."; }
+			bool editable = !busy && !ended && workspace.Target.IsAlive;
 			addressBox.Enabled = lengthBox.Enabled = nameBox.Enabled = assemblyBox.Enabled = hexBox.Enabled = modeBox.Enabled = semanticBox.Enabled = locatorBox.Enabled = patternBox.Enabled = entryOffsetBox.Enabled = editable;
 			loadButton.Enabled = previewButton.Enabled = editable; nopButton.Enabled = editable && originals != null;
 			prepareButton.Enabled = editable && SelectedMode == PatchMode.Hook && workspace.Target.SupportsAllocation;
 			applyButton.Enabled = editable && (prepared != null || preview?.CanApply == true);
 			var live = RestoreTarget();
-			restoreButton.Enabled = !busy && live != null;
+			restoreButton.Enabled = !busy && !ended && live != null;
 			saveButton.Enabled = editable && originals != null && !repository.IsReadOnly;
 			cancelButton.Enabled = !busy && prepared != null;
 			followRegisterButton.Enabled = editable && snapshot != null && snapshot.Registers.Count != 0;
@@ -542,6 +575,7 @@ namespace ReClassNET.Forms
 			var boundaryPill = definition.Boundary == BoundarySource.Execution ? new DebuggerHeader.HeaderPill { Text = "CONFIRMED BY EXECUTION", Severity = Severity.Success }
 				: definition.Boundary == BoundarySource.Uncertain ? new DebuggerHeader.HeaderPill { Text = "BOUNDARY UNCERTAIN", Severity = Severity.Attention }
 				: new DebuggerHeader.HeaderPill { Text = "MANUAL ADDRESS", Severity = Severity.Neutral };
+			if (ended) { header.SetPills(boundaryPill, new DebuggerHeader.HeaderPill { Text = "SESSION ENDED", Severity = Severity.Danger }); UpdateSizeMeter(); return; }
 			header.SetPills(boundaryPill,
 				prepared != null ? new DebuggerHeader.HeaderPill { Text = "HOOK PREPARED", Severity = Severity.Info, Pulse = true } : null,
 				live != null ? new DebuggerHeader.HeaderPill { Text = "PATCH ACTIVE", Severity = Severity.Danger, Pulse = true, Solid = true } : null);
@@ -552,13 +586,16 @@ namespace ReClassNET.Forms
 		private void QueueUpdate() { if (IsDisposed || !IsHandleCreated) return; try { BeginInvoke(new Action(() => { if (!IsDisposed) UpdateButtons(); })); } catch (InvalidOperationException) { } }
 		private async void EditorClosing(object sender, FormClosingEventArgs e)
 		{
-			if (closingAfterCleanup) return;
+			if (closingAfterCleanup || cleanupFailed || workspace.SessionEnded) return;
 			if (busy) { e.Cancel = true; closeRequested = true; operation?.Cancel(); status.Text = "Cancelling the operation and completing cleanup before closing."; return; }
 			conversion?.Cancel(); debounce.Stop();
 			if (prepared == null) return;
-			e.Cancel = true; await RunAsync(async () => { await CancelPreparationAsync(); closingAfterCleanup = true; }); if (closingAfterCleanup) Close();
+			e.Cancel = true; await RunAsync(async () => { await CancelPreparationAsync(); closingAfterCleanup = true; });
+			if (closingAfterCleanup) Close();
+			else if (!IsDisposed) { cleanupFailed = true; status.Text += " Close again to close anyway."; }
 		}
-		private void EditorClosed(object sender, FormClosedEventArgs e) { workspace.Manager.Changed -= ManagerChanged; workspace.Session.StateChanged -= SessionChanged; conversion?.Cancel(); conversion?.Dispose(); debounce.Dispose(); tips.Dispose(); GlobalWindowManager.RemoveWindow(this); }
+		private void WorkspaceEnded(object sender, EventArgs e) => QueueUpdate();
+		private void EditorClosed(object sender, FormClosedEventArgs e) { workspace.Manager.Changed -= ManagerChanged; workspace.Session.StateChanged -= SessionChanged; workspace.Ended -= WorkspaceEnded; conversion?.Cancel(); conversion?.Dispose(); debounce.Dispose(); tips.Dispose(); GlobalWindowManager.RemoveWindow(this); }
 		protected override void OnLoad(EventArgs e) { base.OnLoad(e); GlobalWindowManager.AddWindow(this); }
 	}
 }

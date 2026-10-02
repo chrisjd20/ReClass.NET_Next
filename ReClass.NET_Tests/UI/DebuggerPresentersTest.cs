@@ -153,5 +153,41 @@ namespace ReClass.NET_Tests.UI
 		{
 			Check.That(DebuggerTheme.Classify(message)).IsEqualTo(expected);
 		}
+	
+		[Fact]
+		public void OnlyAddressesCanBeFollowedAndEveryTileReadsInDecimal()
+		{
+			var registers = new Dictionary<string, ulong> { { "rax", 0x7FF600001000 }, { "r9", 0x26E0 }, { "rflags", 0x246 } };
+
+			var views = RegisterHighlights.Build(registers, null, 0, 0, null, value => value == 0x7FF600001000);
+
+			var rax = views.Single(v => v.Name == "rax");
+			var r9 = views.Single(v => v.Name == "r9");
+			Check.That(rax.LooksLikeAddress).IsTrue();
+			Check.That(r9.LooksLikeAddress).IsFalse();
+			Check.That(views.Single(v => v.Name == "rflags").LooksLikeAddress).IsFalse();
+			Check.That(r9.Describe()).Contains("0x26E0 = 9,952 in decimal").And.Contains("plain number");
+			Check.That(rax.Describe()).Contains("Click to open");
+		}
+
+		[Fact]
+		public void EndedWatchWindowSaysSoBeforeAnythingElse()
+		{
+			var advice = WatchCoach.For(new WatchCoachState { Ended = true, Paused = true, Rows = 2, Confirmed = 1 });
+
+			Check.That(advice.Severity).IsEqualTo(Severity.Danger);
+			Check.That(advice.Message).Contains("ended");
+			Check.That(advice.Button).IsNull();
+		}
+
+		[Theory]
+		[InlineData(15, 30)]
+		[InlineData(30, 42)]
+		[InlineData(45, 57)]
+		[InlineData(200, 57)]
+		public void StatusLineGrowsToThreeLines(int textHeight, int expected)
+		{
+			Check.That(StatusLayout.HeightFor(textHeight, 15, 30, 12)).IsEqualTo(expected);
+		}
 	}
 }

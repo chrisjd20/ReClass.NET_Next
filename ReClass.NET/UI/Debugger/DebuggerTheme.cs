@@ -116,14 +116,18 @@ namespace ReClassNET.UI.Debugger
 
 		public static Size Measure(string text, Font font) => TextRenderer.MeasureText(text ?? "", font, Size.Empty, TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
 
+		// On Windows, GDI text ignores Graphics.TranslateTransform and clipping unless asked to keep them. Without
+		// these flags, scrolled views move their shapes but leave the text where it was.
+		private const TextFormatFlags KeepGraphicsState = TextFormatFlags.PreserveGraphicsTranslateTransform | TextFormatFlags.PreserveGraphicsClipping;
+
 		public static void DrawText(Graphics g, string text, Font font, Color color, int x, int y)
 		{
-			TextRenderer.DrawText(g, text ?? "", font, new Point(x, y), color, TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
+			TextRenderer.DrawText(g, text ?? "", font, new Point(x, y), color, TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix | KeepGraphicsState);
 		}
 
 		public static void DrawText(Graphics g, string text, Font font, Color color, Rectangle bounds, TextFormatFlags flags)
 		{
-			TextRenderer.DrawText(g, text ?? "", font, bounds, color, flags | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
+			TextRenderer.DrawText(g, text ?? "", font, bounds, color, flags | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | KeepGraphicsState);
 		}
 
 		/// <summary>A small rounded label such as CONFIRMED. Returns its width.</summary>

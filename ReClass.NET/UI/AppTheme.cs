@@ -66,12 +66,12 @@ namespace ReClassNET.UI
 		{
 			Kind = ThemeKind.Dark,
 			Background = Color.FromArgb(0x14, 0x18, 0x1F), Panel = Color.FromArgb(0x1B, 0x20, 0x29), Raised = Color.FromArgb(0x23, 0x2A, 0x35),
-			Hover = Color.FromArgb(0x2C, 0x35, 0x43), Border = Color.FromArgb(0x2E, 0x36, 0x44), Text = Color.FromArgb(0xE6, 0xEA, 0xF0),
-			Muted = Color.FromArgb(0x8B, 0x95, 0xA5), Faint = Color.FromArgb(0x5A, 0x63, 0x72),
+			Hover = Color.FromArgb(0x2C, 0x35, 0x43), Border = Color.FromArgb(0x2E, 0x36, 0x44), Text = Color.FromArgb(0xF0, 0xF3, 0xF7),
+			Muted = Color.FromArgb(0xAC, 0xB5, 0xC3), Faint = Color.FromArgb(0x7D, 0x87, 0x97),
 			Teal = Color.FromArgb(0x3D, 0xD6, 0xB5), Amber = Color.FromArgb(0xF5, 0xB8, 0x4B), Red = Color.FromArgb(0xFF, 0x6B, 0x6B),
 			Blue = Color.FromArgb(0x6F, 0xB3, 0xFF), Violet = Color.FromArgb(0xB4, 0x8C, 0xFF),
 			AsmMnemonic = Color.FromArgb(0x7C, 0xB7, 0xFF), AsmRegister = Color.FromArgb(0x4F, 0xE0, 0xC0), AsmNumber = Color.FromArgb(0xFF, 0xA8, 0x5C),
-			AsmKeyword = Color.FromArgb(0xC3, 0x9B, 0xFF), AsmPunctuation = Color.FromArgb(0x9A, 0xA4, 0xB4),
+			AsmKeyword = Color.FromArgb(0xC3, 0x9B, 0xFF), AsmPunctuation = Color.FromArgb(0xB8, 0xC0, 0xCC),
 			Good = Color.FromArgb(0x4F, 0xD1, 0x8B), Bad = Color.FromArgb(0xFF, 0x7A, 0x7A), Changed = Color.FromArgb(0xFF, 0x7A, 0x7A),
 			Memory = new MemoryColors
 			{
@@ -154,6 +154,7 @@ namespace ReClassNET.UI
 			public Color GridBack, GridLines;
 			public bool HeadersVisual;
 			public Color? LinkColor, ActiveLinkColor, VisitedLinkColor;
+			public bool? ListOwnerDraw;
 		}
 
 		private static readonly ConditionalWeakTable<Control, Original> originals = new ConditionalWeakTable<Control, Original>();
@@ -210,7 +211,7 @@ namespace ReClassNET.UI
 				case RichTextBox rich: original.Border = rich.BorderStyle; break;
 				case ListBox list: original.Border = list.BorderStyle; original.ItemDraw = list.DrawMode; break;
 				case TreeView tree: original.Border = tree.BorderStyle; original.Line = tree.LineColor; original.TreeDraw = tree.DrawMode; original.Images = ImagesOf(tree.ImageList); break;
-				case ListView view: original.Border = view.BorderStyle; break;
+				case ListView view: original.Border = view.BorderStyle; original.ListOwnerDraw = view.OwnerDraw; break;
 				case NumericUpDown number: original.Border = number.BorderStyle; break;
 				case ComboBox combo: original.Flat = combo.FlatStyle; original.ItemDraw = combo.DrawMode; break;
 				case ButtonBase button: original.Flat = button.FlatStyle; original.VisualStyleBack = button.UseVisualStyleBackColor; break;
@@ -242,7 +243,9 @@ namespace ReClassNET.UI
 				case RichTextBox rich: rich.BorderStyle = o.Border.Value; break;
 				case ListBox list: list.BorderStyle = o.Border.Value; list.DrawMode = o.ItemDraw.Value; break;
 				case TreeView tree: tree.BorderStyle = o.Border.Value; tree.LineColor = o.Line.Value; tree.DrawMode = o.TreeDraw.Value; RestoreImages(tree.ImageList, o.Images); break;
-				case ListView view: view.BorderStyle = o.Border.Value; break;
+				case ListView view:
+					view.BorderStyle = o.Border.Value; view.DrawColumnHeader -= DrawListHeader; view.DrawItem -= DrawListItem; view.DrawSubItem -= DrawListSubItem;
+					view.OwnerDraw = o.ListOwnerDraw.Value; view.Invalidate(); break;
 				case NumericUpDown number: number.BorderStyle = o.Border.Value; break;
 				case ComboBox combo: combo.FlatStyle = o.Flat.Value; combo.DrawMode = o.ItemDraw.Value; break;
 				case ButtonBase button: button.FlatStyle = o.Flat.Value; button.UseVisualStyleBackColor = o.VisualStyleBack.Value; button.Paint -= PaintDisabledButton; break;
@@ -326,6 +329,14 @@ namespace ReClassNET.UI
 				case ListView view:
 					Remember(view); view.BackColor = p.Panel; view.ForeColor = p.Text;
 					if (view.BorderStyle == BorderStyle.Fixed3D) view.BorderStyle = BorderStyle.FixedSingle;
+					// Column headers are drawn in system colours (a white strip on Windows); rows keep the default drawing.
+					if (view.View == View.Details && !view.OwnerDraw)
+					{
+						view.OwnerDraw = true;
+						view.DrawColumnHeader -= DrawListHeader; view.DrawColumnHeader += DrawListHeader;
+						view.DrawItem -= DrawListItem; view.DrawItem += DrawListItem;
+						view.DrawSubItem -= DrawListSubItem; view.DrawSubItem += DrawListSubItem;
+					}
 					break;
 				case DataGridView grid:
 					Remember(grid); StyleGrid(grid, p); break;
@@ -534,6 +545,23 @@ namespace ReClassNET.UI
 			if (selected) using (var accent = new SolidBrush(p.Teal)) e.Graphics.FillRectangle(accent, bounds.X + 4, bounds.Bottom - 3, bounds.Width - 8, 2);
 		}
 
+		private static void DrawListHeader(object sender, DrawListViewColumnHeaderEventArgs e)
+		{
+			var p = Current;
+			if (!p.IsDark) { e.DrawDefault = true; return; }
+			using (var back = new SolidBrush(p.Raised)) e.Graphics.FillRectangle(back, e.Bounds);
+			using (var line = new Pen(p.Border))
+			{
+				e.Graphics.DrawLine(line, e.Bounds.Left, e.Bounds.Bottom - 1, e.Bounds.Right, e.Bounds.Bottom - 1);
+				e.Graphics.DrawLine(line, e.Bounds.Right - 1, e.Bounds.Top + 4, e.Bounds.Right - 1, e.Bounds.Bottom - 5);
+			}
+			TextRenderer.DrawText(e.Graphics, e.Header.Text, e.Font, Rectangle.Inflate(e.Bounds, -6, 0), p.Muted, TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+		}
+
+		private static void DrawListItem(object sender, DrawListViewItemEventArgs e) => e.DrawDefault = true;
+
+		private static void DrawListSubItem(object sender, DrawListViewSubItemEventArgs e) => e.DrawDefault = true;
+
 		private static void DrawComboItem(object sender, DrawItemEventArgs e)
 		{
 			var combo = (ComboBox)sender;
@@ -574,6 +602,11 @@ namespace ReClassNET.UI
 		[DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
 		private static extern int SetWindowTheme(IntPtr hwnd, string appName, string idList);
 
+		[DllImport("user32.dll")]
+		private static extern IntPtr SendMessage(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam);
+
+		private const int LVM_GETHEADER = 0x101F;
+
 		/// <summary>
 		/// On Windows 10/11: a dark or light title bar, scroll bars and list/tree/combo chrome to match the theme. A no-op elsewhere.
 		/// </summary>
@@ -607,7 +640,16 @@ namespace ReClassNET.UI
 				{
 					var target = control; var name = theme;
 					// An empty theme name turns visual styles off for the control, which lets ProgressBar use its colours.
-					EventHandler set = (s, e) => { try { if (name.Length == 0) SetWindowTheme(target.Handle, "", ""); else SetWindowTheme(target.Handle, name, null); } catch (Exception) { } };
+					EventHandler set = (s, e) =>
+					{
+						try
+						{
+							if (name.Length == 0) SetWindowTheme(target.Handle, "", ""); else SetWindowTheme(target.Handle, name, null);
+							// The header strip past the last column is painted by the header window itself.
+							if (target is ListView) { var header = SendMessage(target.Handle, LVM_GETHEADER, IntPtr.Zero, IntPtr.Zero); if (header != IntPtr.Zero) SetWindowTheme(header, dark ? "DarkMode_ItemsView" : null, null); }
+						}
+						catch (Exception) { }
+					};
 					if (target.IsHandleCreated) set(target, EventArgs.Empty); else target.HandleCreated += set;
 				}
 				ThemeChildren(control, dark);

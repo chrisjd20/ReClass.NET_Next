@@ -1,4 +1,5 @@
 #include "ui.h"
+#include "selection.h"
 #include "fonts.generated.h"
 #include <algorithm>
 #include <cmath>
@@ -85,6 +86,14 @@ std::vector<std::string> wrap(const std::string& value, float width, float size,
 float paragraph(const std::string& value, float x, float y, float width, float size, Color color, Face face) {
     const auto lines = wrap(value, std::max(25.0f, width), size, face);
     const float lineHeight = size * 1.48f;
+    if (recorder) {
+        const auto joins = lineJoins(displayText(value), lines);
+        for (std::size_t i = 0; i < lines.size(); ++i) {
+            selectableText(lines[i], x, y, size, color, face, y - size * .24f, lineHeight, joins[i]);
+            y += lineHeight;
+        }
+        return y;
+    }
     for (const auto& line : lines) { text(line, x, y, size, color, face); y += lineHeight; }
     return y;
 }
@@ -108,7 +117,7 @@ bool Ui::button(Rectangle rect, const std::string& label, float size, bool selec
     text(label, rect.x + (rect.width - textWidth(label, fitted, Face::Bold)) * .5f,
          rect.y + (rect.height - fitted) * .5f, fitted, enabled ? selected ? Teal : Ink : Muted, Face::Bold);
     if (hover && !tip.empty()) tooltip = tip;
-    return hover && enabled && IsMouseButtonReleased(MOUSE_BUTTON_LEFT);
+    return hover && enabled && clicked();
 }
 int Ui::tabs(Rectangle rect, const std::vector<std::string>& labels, int selected, float size) {
     int result = -1;
@@ -121,7 +130,7 @@ int Ui::tabs(Rectangle rect, const std::vector<std::string>& labels, int selecte
         text(label, tab.x + (tab.width - textWidth(label, size, Face::Bold)) * .5f, tab.y + (tab.height - size) * .5f - 1,
              size, active ? Teal : hover ? Ink : Muted, Face::Bold);
         DrawRectangleRec({tab.x + 6, tab.y + tab.height - 3, tab.width - 12, 3}, active ? Teal : hover ? Border : Color{0, 0, 0, 0});
-        if (hover && !active && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) result = static_cast<int>(i);
+        if (hover && !active && clicked()) result = static_cast<int>(i);
     }
     DrawLineEx({rect.x, rect.y + rect.height}, {rect.x + rect.width, rect.y + rect.height}, 1, Border);
     return result;

@@ -777,7 +777,7 @@
         },
         {
           "where": "game",
-          "text": "Step on the plate again until it hits you.",
+          "text": "Step on the plate again until it hits you, then step off.",
           "check": "hit",
           "see": "The row gets a green CONFIRMED badge."
         },
@@ -794,8 +794,8 @@
         },
         {
           "where": "reclass",
-          "text": "In the second window select the captured row. Open the Registers tab below it and find the R9 tile (the Raw tab has the same values as text). Then click `Stop`, then `Resume (F5)` so the game runs again.",
-          "why": "Functions receive their inputs in registers. The damage routine gets a 4-digit code in r9 with every hit; only your hits carry the real one. Registers are shown in hex: Windows Calculator in Programmer mode converts them.",
+          "text": "In the second window select the row whose Data address is your ROOKIE address, `{{live.rookie.hex}}`. Open the Registers tab below it and find the R9 tile; hover it to see the value in decimal too (the Raw tab has the same values as text). Then click `Stop`, then `Resume (F5)` so the game runs again.",
+          "why": "Functions receive their inputs in registers. The damage routine gets a 4-digit code in r9 with every hit; only your hits carry the real one. Registers are shown in hex; a tile holding a plain number also shows it in decimal. If a second row shows the sentinel's address, ignore it: its R9 holds a decoy.",
           "show": "RAX  0x{{live.rookie.row}}  <- you\n...\nR9   {{live.override.r9}}\n      <- the override code\n\nIn decimal: {{live.override}}",
           "see": "R9 in the details. The steps show the same number so you can check it: {{live.override}} in decimal."
         },
@@ -953,7 +953,7 @@
         {
           "where": "reclass",
           "text": "Click `Trace selected thread`, keep the limits, click `Trace` and save the CSV. Tracing leaves the game paused: click `Resume (F5)`, then `Stop` the watch.",
-          "why": "The CSV has one line per instruction the thread ran: address, instruction, thread, and the registers before and after. Comparing a failing run with a passing one shows exactly where they split."
+          "why": "The CSV has one line per instruction the thread ran from where it stopped: address, instruction, thread, and the registers before and after. Your run is already past the checks, so it starts in the deny code (xor eax,eax: the answer 0, \"locked\") and follows the game from there."
         },
         {
           "where": "reclass",
@@ -1012,7 +1012,7 @@
         },
         {
           "where": "game",
-          "text": "Quit the game (Ctrl+Q) and start it again. It reopens in this room with every address changed: right now the ammo instruction is at `{{live.ammo.site.hex}}`; after the restart this step shows a new number."
+          "text": "Quit the game (Ctrl+Q) and start it again. It reopens in this room with every address changed: right now the ammo instruction is at `{{live.ammo.site.hex}}`; after the restart this step shows the new one (usually a different number; if Windows happens to reuse the same spot, the steps still work the same way)."
         },
         {
           "where": "reclass",

@@ -66,7 +66,7 @@ add_custom_target(breakout-content DEPENDS
   "${GENERATED}/fonts.generated.h"
   "${GENERATED}/layout.h" "${GENERATED}/layout.inc" "${GENERATED}/layout.md"
   "${GENERATED}/lessons.generated.cpp" "${GENERATED}/GUIDE.html" "${GENERATED}/GUIDE.md")
-add_executable(ReClassBreakout src/main.cpp src/frontend.cpp src/ui.cpp src/scene.cpp src/sprites.cpp src/progress.cpp src/game.cpp src/teaching.asm "${GENERATED}/lessons.generated.cpp")
+add_executable(ReClassBreakout src/main.cpp src/frontend.cpp src/ui.cpp src/selection.cpp src/scene.cpp src/sprites.cpp src/progress.cpp src/game.cpp src/teaching.asm "${GENERATED}/lessons.generated.cpp")
 add_dependencies(ReClassBreakout breakout-content)
 target_include_directories(ReClassBreakout PRIVATE src "${CMAKE_CURRENT_BINARY_DIR}" "${GENERATED}")
 set_source_files_properties(src/teaching.asm PROPERTIES

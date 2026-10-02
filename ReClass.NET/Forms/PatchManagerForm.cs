@@ -17,7 +17,7 @@ namespace ReClassNET.Forms
 		private readonly DebugWorkspace workspace;
 		private readonly PatchRepository repository;
 		private readonly ListView list = new ListView { Dock = DockStyle.Fill, View = View.Details, FullRowSelect = true, MultiSelect = false, HideSelection = false };
-		private readonly Label status = new Label { Dock = DockStyle.Fill, Padding = new Padding(5) };
+		private readonly Label status = new Label { Dock = DockStyle.Fill, Padding = new Padding(5), AutoEllipsis = true };
 		private readonly Button newButton = new Button { Text = "New…", AutoSize = true };
 		private readonly Button openButton = new Button { Text = "Open editor", AutoSize = true };
 		private readonly Button previewButton = new Button { Text = "Preview", AutoSize = true };
@@ -29,15 +29,18 @@ namespace ReClassNET.Forms
 		private readonly System.Windows.Forms.Timer refresh = new System.Windows.Forms.Timer { Interval = 1000 };
 		private readonly Dictionary<Guid, Tuple<string, string>> resolutions = new Dictionary<Guid, Tuple<string, string>>();
 		private readonly Dictionary<Guid, PatchPreview> previews = new Dictionary<Guid, PatchPreview>();
-		private bool busy;
+		private bool busy, endedShown, fillingColumns;
 		public PatchManagerForm(DebugWorkspace workspace)
 		{
 			this.workspace = workspace ?? throw new ArgumentNullException(nameof(workspace)); repository = workspace.Repository;
-			Text = "Patches"; Size = new Size(1060, 520); MinimumSize = new Size(800, 380); StartPosition = FormStartPosition.CenterParent;
-			foreach (var column in new[] { Tuple.Create("Name", 150), Tuple.Create("Status", 120), Tuple.Create("Mode", 90), Tuple.Create("Target", 180), Tuple.Create("Selected bytes", 95), Tuple.Create("Details", 320) }) list.Columns.Add(column.Item1, column.Item2);
-			var layout = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 3, ColumnCount = 1, Padding = new Padding(8) };
-			layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40)); layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 60));
-			layout.Controls.Add(list, 0, 0); var actions = new FlowLayoutPanel { Dock = DockStyle.Fill }; actions.Controls.AddRange(new Control[] { newButton, openButton, previewButton, applyButton, restoreButton, restoreAllButton, cancelButton, deleteButton }); layout.Controls.Add(actions, 0, 1); layout.Controls.Add(status, 0, 2); Controls.Add(layout);
+			Text = "Patches"; Size = new Size(DpiUtil.ScaleIntX(1060), DpiUtil.ScaleIntY(520)); MinimumSize = new Size(DpiUtil.ScaleIntX(800), DpiUtil.ScaleIntY(380)); StartPosition = FormStartPosition.CenterParent;
+			foreach (var column in new[] { Tuple.Create("Name", 150), Tuple.Create("Status", 120), Tuple.Create("Mode", 90), Tuple.Create("Target", 180), Tuple.Create("Selected bytes", 95), Tuple.Create("Details", 320) }) list.Columns.Add(column.Item1, DpiUtil.ScaleIntX(column.Item2));
+			var layout = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 3, ColumnCount = 1, Padding = new Padding(DpiUtil.ScaleIntX(8)) };
+			// The button row grows when the buttons wrap; the status keeps room for two or three lines of guidance.
+			layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); layout.RowStyles.Add(new RowStyle(SizeType.AutoSize)); layout.RowStyles.Add(new RowStyle(SizeType.Absolute, DpiUtil.ScaleIntY(64)));
+			layout.Controls.Add(list, 0, 0); var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = true }; actions.Controls.AddRange(new Control[] { newButton, openButton, previewButton, applyButton, restoreButton, restoreAllButton, cancelButton, deleteButton }); layout.Controls.Add(actions, 0, 1); layout.Controls.Add(status, 0, 2); Controls.Add(layout);
+			// Details takes the remaining width, so no empty header strip is left past the last column.
+			list.Resize += (s, e) => FillDetailsColumn(); list.ColumnWidthChanged += (s, e) => { if (!fillingColumns) FillDetailsColumn(); };
 			list.SelectedIndexChanged += (s, e) => UpdateButtons(); list.DoubleClick += async (s, e) => await RunAsync(OpenEditorAsync);
 			openButton.Click += async (s, e) => await RunAsync(OpenEditorAsync); restoreButton.Click += async (s, e) => await RunAsync(RestoreAsync);
 			newButton.Click += (s, e) => { if (!busy) new AssemblyEditorForm(workspace, 0).Show(this); };
@@ -46,11 +49,24 @@ namespace ReClassNET.Forms
 			restoreAllButton.Click += async (s, e) => await RunAsync(RestoreAllAsync);
 			cancelButton.Click += async (s, e) => await RunAsync(async () => { var result = await workspace.Manager.CancelPreparationAsync(); status.Text = result.Message; });
 			deleteButton.Click += async (s, e) => await RunAsync(DeleteAsync);
-			repository.Changed += Changed; workspace.Manager.Changed += Changed; workspace.Session.StateChanged += SessionChanged;
+			repository.Changed += Changed; workspace.Manager.Changed += Changed; workspace.Session.StateChanged += SessionChanged; workspace.Ended += Changed;
 			refresh.Tick += (s, e) => { if (!busy) RefreshRows(); }; refresh.Start();
 			FormClosing += (s, e) => { if (busy) { e.Cancel = true; status.Text = "Finishing the current patch operation before closing."; } };
-			FormClosed += (s, e) => { refresh.Dispose(); repository.Changed -= Changed; workspace.Manager.Changed -= Changed; workspace.Session.StateChanged -= SessionChanged; GlobalWindowManager.RemoveWindow(this); };
-			RefreshRows(); status.Text = repository.Message ?? "Saved definitions load inactive. Open an editor to resolve and preview before applying. Save the project file to persist changes.";
+			FormClosed += (s, e) => { refresh.Dispose(); repository.Changed -= Changed; workspace.Manager.Changed -= Changed; workspace.Session.StateChanged -= SessionChanged; workspace.Ended -= Changed; GlobalWindowManager.RemoveWindow(this); };
+			RefreshRows(); status.Text = repository.Message ?? "Saved patches load inactive. Select one, then Preview and Apply; Open editor shows and changes its code. Use File → Save in the main window to keep changes.";
+		}
+		private void FillDetailsColumn()
+		{
+			if (list.Columns.Count == 0 || fillingColumns) return;
+			fillingColumns = true;
+			try
+			{
+				int others = list.Columns.Cast<ColumnHeader>().Take(list.Columns.Count - 1).Sum(c => c.Width);
+				// ClientSize already excludes a vertical scroll bar when one is shown.
+				int room = list.ClientSize.Width - others - 2;
+				list.Columns[list.Columns.Count - 1].Width = Math.Max(DpiUtil.ScaleIntX(160), room);
+			}
+			finally { fillingColumns = false; }
 		}
 		private Guid? SelectedId => list.SelectedItems.Count == 0 ? (Guid?)null : (Guid)list.SelectedItems[0].Tag;
 		private void RefreshRows()
@@ -119,7 +135,9 @@ namespace ReClassNET.Forms
 		{
 			var definition = SelectedDefinition();
 			if (workspace.Manager.ActivePatches.Any(p => p.Id == definition.Id)) throw new InvalidOperationException("This patch is already applied. Restore original first to preview it again.");
-			var preview = await workspace.Planner.PreviewAsync(definition, workspace.Target);
+			// Finding a Module + offset patch hashes the module first, which can take a moment.
+			status.Text = "Finding " + (definition.Name ?? "the patch") + " in the game… (checking the module's fingerprint and original bytes)"; status.Refresh();
+			var preview = await Task.Run(() => workspace.Planner.PreviewAsync(definition, workspace.Target));
 			previews[definition.Id] = preview;
 			var ok = preview.Status == PatchStatus.Previewed;
 			var summary = ok ? "0x" + preview.Address.ToString("X") + ": " + AssemblyService.FormatHex(preview.OriginalBytes) + " -> " + AssemblyService.FormatHex(preview.ReplacementBytes) + (preview.PaddingLength > 0 ? " (" + preview.PaddingLength + " NOP padding)" : "") + (definition.Mode == PatchMode.Hook ? "; hook body is prepared on Apply" : "") : preview.Message;
@@ -176,6 +194,13 @@ namespace ReClassNET.Forms
 		}
 		private void UpdateButtons()
 		{
+			// A list opened for a game that has since exited (or before ReClass attached to a new one) can only be closed.
+			if (workspace.Session.IsDisposed)
+			{
+				foreach (var button in new[] { newButton, openButton, previewButton, applyButton, restoreButton, restoreAllButton, cancelButton, deleteButton }) button.Enabled = false;
+				if (!endedShown) { endedShown = true; status.Text = "This list belongs to a game session that has ended. Close it, attach to the running game, then open Debugger → Saved and active patches… again."; }
+				return;
+			}
 			bool selected = SelectedId.HasValue, sameProject = ReferenceEquals(repository, workspace.Repository); bool enabled = !busy && sameProject;
 			openButton.Enabled = enabled && selected && workspace.Target.IsAlive; newButton.Enabled = enabled && workspace.Target.IsAlive;
 			bool inactive = selected && !workspace.Manager.ActivePatches.Any(p => p.Id == SelectedId.Value);

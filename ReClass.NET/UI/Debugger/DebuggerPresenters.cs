@@ -61,6 +61,8 @@ namespace ReClassNET.UI.Debugger
 	public sealed class WatchCoachState
 	{
 		public bool Execution, WriteOnly, Collecting, ConfirmPending, Paused, Detached;
+		/// <summary>The game exited or ReClass moved to another process: this window can only be read and closed.</summary>
+		public bool Ended;
 		public int Rows, Confirmed, Unlikely, Candidates;
 		public HitKind? Selected;
 	}
@@ -70,6 +72,7 @@ namespace ReClassNET.UI.Debugger
 	{
 		public static CoachAdvice For(WatchCoachState s)
 		{
+			if (s.Ended) return new CoachAdvice(Severity.Danger, "This window belongs to a game session that has ended. Its rows stay readable; close it and start a new watch from the running game.");
 			if (s.Paused) return new CoachAdvice(Severity.Attention, "The game is paused. Step into (F11) runs one instruction and shows the registers; Resume (F5) lets it continue.", "Resume (F5)");
 			if (s.Execution)
 			{
@@ -172,6 +175,16 @@ namespace ReClassNET.UI.Debugger
 		public string Name;
 		public ulong Value;
 		public bool Used, PointsAtWatched, Changed, IsInstructionPointer;
+		/// <summary>The value is an address of mapped game memory, so it can be followed.</summary>
+		public bool LooksLikeAddress;
+
+		/// <summary>Hover text: the value in hex and decimal, and what clicking does.</summary>
+		public string Describe()
+		{
+			string head = Name.ToUpperInvariant() + " = 0x" + Value.ToString("X") + " = " + Value.ToString("N0", System.Globalization.CultureInfo.InvariantCulture) + " in decimal.";
+			if (LooksLikeAddress) return head + " Click to open the memory it points at, as a class (current memory).";
+			return head + " This is a plain number, not an address in the game's memory, so there is nothing to open.";
+		}
 	}
 
 	public static class RegisterHighlights
@@ -182,7 +195,7 @@ namespace ReClassNET.UI.Debugger
 		/// Orders registers the usual way and marks the interesting ones: used by the instruction, pointing into the
 		/// watched data, or changed since the previous snapshot.
 		/// </summary>
-		public static List<RegisterView> Build(IDictionary<string, ulong> registers, IEnumerable<string> used, ulong watchedStart, int watchedLength, IDictionary<string, ulong> previous)
+		public static List<RegisterView> Build(IDictionary<string, ulong> registers, IEnumerable<string> used, ulong watchedStart, int watchedLength, IDictionary<string, ulong> previous, Func<ulong, bool> isAddress = null)
 		{
 			var result = new List<RegisterView>();
 			if (registers == null) return result;
@@ -203,7 +216,8 @@ namespace ReClassNET.UI.Debugger
 					Used = usedSet.Contains(name),
 					IsInstructionPointer = name == "rip",
 					PointsAtWatched = watchedLength > 0 && watchedStart != 0 && value >= watchedStart && value - watchedStart < (ulong)watchedLength,
-					Changed = previous != null && previous.TryGetValue(key, out before) && before != value
+					Changed = previous != null && previous.TryGetValue(key, out before) && before != value,
+					LooksLikeAddress = name != "rflags" && value != 0 && (isAddress?.Invoke(value) ?? true)
 				});
 			}
 			return result;
@@ -232,6 +246,19 @@ namespace ReClassNET.UI.Debugger
 				case SizeFit.TooLong: return replacement + " / " + original + " bytes: too long to patch in place. Click here to switch Patch mode to Hook.";
 				default: return "Load a selection to compare sizes.";
 			}
+		}
+	}
+
+	/// <summary>Sizing for the debugger windows' status bar.</summary>
+	public static class StatusLayout
+	{
+		public const int MaxLines = 3;
+
+		/// <summary>The height for text that measures <paramref name="textHeight"/> when wrapped: one to <see cref="MaxLines"/> lines plus padding.</summary>
+		public static int HeightFor(int textHeight, int lineHeight, int minimum, int padding)
+		{
+			int lines = Math.Max(1, Math.Min(MaxLines, (textHeight + lineHeight - 1) / Math.Max(1, lineHeight)));
+			return Math.Max(minimum, lines * lineHeight + padding);
 		}
 	}
 }

@@ -98,6 +98,10 @@ namespace ReClassNET.Debugger
         public AdvancedCapabilities Capabilities => provider?.Capabilities??AdvancedCapabilities.None;
         public event Action<DebugSessionState> StateChanged;
         public event Action<string> Diagnostic;
+        /// <summary>A watch stopped on its own (an error or a limit), with the reason. Raised on the debugger thread.</summary>
+        public event Action<Guid,string> WatchStopped;
+        /// <summary>True once Dispose has run: every further call fails, so windows must stop using the session.</summary>
+        public bool IsDisposed=>shutdown;
         public event Action<ulong,bool> ModuleChanged;
         public Func<Task> RestoreOwnedPatchesAsync {get;set;}
         public Func<ulong,int,string> FindPatchOverlap {get;set;}
@@ -124,6 +128,12 @@ namespace ReClassNET.Debugger
             var subscribers=Diagnostic;
             if(subscribers!=null)foreach(Action<string> handler in subscribers.GetInvocationList())
                 try{handler(message);}catch(Exception error){System.Diagnostics.Debug.WriteLine(error.Message);}
+        }
+        private void RaiseWatchStopped(DebugWatch watch)
+        {
+            var subscribers=WatchStopped;
+            if(subscribers!=null)foreach(Action<Guid,string> handler in subscribers.GetInvocationList())
+                try{handler(watch.Id,watch.Error??"Watch stopped.");}catch(Exception error){System.Diagnostics.Debug.WriteLine(error.Message);}
         }
         private static InvalidOperationException EventWaitFailure(string message,AdvancedEvent evt)=>
             new InvalidOperationException(message+" Native error "+evt.Code+" (0x"+evt.Code.ToString("X")+"), thread "+evt.Thread+", event "+evt.Kind+", address 0x"+evt.Address.ToString("X")+".");
@@ -317,7 +327,7 @@ namespace ReClassNET.Debugger
             if(stopDepth>0)throw new InvalidOperationException("A code transaction owns the process stop; retry after it finishes.");
             if((Capabilities&(AdvancedCapabilities.Context|AdvancedCapabilities.Stepping))!=(AdvancedCapabilities.Context|AdvancedCapabilities.Stepping))throw new NotSupportedException("Instruction discovery requires thread context and instruction stepping from the selected provider.");
             var overlap=FindPatchOverlap?.Invoke(address,1);if(overlap!=null)throw new InvalidOperationException(overlap);
-            if(watches.Values.Any(w=>w.Execution&&w.Address==address))throw new InvalidOperationException("Instruction already watched.");
+            if(watches.Values.Any(w=>w.Execution&&w.Address==address))throw new InvalidOperationException("This instruction is already being watched in another window. Press Stop there first, then try again.");
             var watch=new DebugWatch{Address=address,Length=1,Execution=true,Sink=sink,ConditionText=condition,Condition=WatchCondition.Parse(condition),PauseWhenMatched=pause};
             bool resume=State==DebugSessionState.Running;PauseInternal();
             try
@@ -478,12 +488,12 @@ namespace ReClassNET.Debugger
                 if(!watch.Condition.Evaluate(snapshot.Registers,evt.Thread,watch.Count,ReadExact))return;
                 var candidates=(evt.Context.Available&1)!=0?PreviousCandidates(evt.Context.Rip):new InstructionRecord[0];
                 var key=evt.Context.Rip.ToString("X");ulong count;
-                if(!watch.Counts.TryGetValue(key,out count)&&watch.Counts.Count>=10000){watch.Error="10,000 distinct instructions reached.";EmitDiagnostic(watch.Error);StopWatchInternal(watch.Id);return;}
+                if(!watch.Counts.TryGetValue(key,out count)&&watch.Counts.Count>=10000){watch.Error="10,000 distinct instructions reached.";EmitDiagnostic(watch.Error);StopWatchInternal(watch.Id);RaiseWatchStopped(watch);return;}
                 watch.Counts[key]=++count;
                 watch.Sink?.Invoke(new WatchHit{WatchId=watch.Id,WatchedAddress=watch.Address,WatchedLength=watch.Length,EventRip=evt.Context.Rip,Count=count,Snapshot=snapshot,Candidates=candidates,Confirmed=false,Completed=true,Status="After event; preceding candidates need confirmation"});
                 if(watch.PauseWhenMatched)userPaused=true;
             }
-            catch(Exception error){watch.Error=error.Message;userPaused=true;EmitDiagnostic("Watch stopped: "+error.Message);StopWatchInternal(watch.Id);}
+            catch(Exception error){watch.Error=error.Message;userPaused=true;EmitDiagnostic("Watch stopped: "+error.Message);StopWatchInternal(watch.Id);RaiseWatchStopped(watch);}
         }
         private void HandleSoftware(DebugWatch watch,AdvancedEvent evt)=>HandleExecution(watch,evt);
         private void HandleExecution(DebugWatch watch,AdvancedEvent evt)
@@ -504,6 +514,7 @@ namespace ReClassNET.Debugger
             {
                 watch.Error=error.Message;userPaused=true;
                 if(watch.Software)watches.Remove(watch.Id);else StopWatchInternal(watch.Id);
+                RaiseWatchStopped(watch);
                 EmitDiagnostic("Watch stopped: "+error.Message);return;
             }
             bool completed=false;

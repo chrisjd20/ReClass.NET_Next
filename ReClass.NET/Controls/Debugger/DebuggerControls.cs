@@ -678,11 +678,12 @@ namespace ReClassNET.Controls.Debugger
 			var bounds = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
 			DebuggerTheme.FillRounded(g, DebuggerTheme.Panel, bounds, DebuggerTheme.Scale(7));
 			DebuggerTheme.StrokeRounded(g, DebuggerTheme.Border, bounds, DebuggerTheme.Scale(7));
-			DebuggerTheme.DrawText(g, Caption.ToUpperInvariant(), DebuggerTheme.UiSmallBold, DebuggerTheme.Faint, DebuggerTheme.Scale(9), DebuggerTheme.Scale(5));
+			DebuggerTheme.DrawText(g, Caption.ToUpperInvariant(), DebuggerTheme.UiSmallBold, DebuggerTheme.Muted, DebuggerTheme.Scale(9), DebuggerTheme.Scale(5));
 		}
 	}
 
 	/// <summary>The bottom status line. Colour and glyph follow the message.</summary>
+	/// <summary>The window's status bar. Long guidance wraps onto up to three lines instead of being cut short.</summary>
 	public class StatusLine : DebuggerControl
 	{
 		private readonly ToolTip tip = new ToolTip();
@@ -694,11 +695,28 @@ namespace ReClassNET.Controls.Debugger
 			BackColor = DebuggerTheme.Panel;
 		}
 
+		private Rectangle TextBounds => new Rectangle(S(34), S(6), Math.Max(S(40), Width - S(44)), Math.Max(S(10), Height - S(12)));
+
+		private void Fit()
+		{
+			int lineHeight = DebuggerTheme.UiFont.Height;
+			int measured = TextRenderer.MeasureText(Text ?? "", DebuggerTheme.UiFont, new Size(TextBounds.Width, int.MaxValue), TextFormatFlags.WordBreak | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix).Height;
+			int height = StatusLayout.HeightFor(measured, lineHeight, S(30), S(12));
+			if (height != Height) Height = height;
+		}
+
 		protected override void OnTextChanged(EventArgs e)
 		{
 			tip.SetToolTip(this, Text);
+			Fit();
 			Invalidate();
 			base.OnTextChanged(e);
+		}
+
+		protected override void OnSizeChanged(EventArgs e)
+		{
+			base.OnSizeChanged(e);
+			if (Width > 0) Fit();
 		}
 
 		protected override void OnPaint(PaintEventArgs e)
@@ -707,9 +725,13 @@ namespace ReClassNET.Controls.Debugger
 			g.Clear(BackColor);
 			using (var pen = new Pen(DebuggerTheme.Border)) g.DrawLine(pen, 0, 0, Width, 0);
 			var severity = DebuggerTheme.Classify(Text);
-			int glyph = S(16);
-			DebuggerTheme.Glyph(g, severity, new Rectangle(S(10), (Height - glyph) / 2, glyph, glyph));
-			DebuggerTheme.DrawText(g, Text, DebuggerTheme.UiFont, severity == Severity.Danger ? DebuggerTheme.Mix(DebuggerTheme.Red, Color.White, .2f) : DebuggerTheme.Text, new Rectangle(S(34), 0, Width - S(44), Height), TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine);
+			int glyph = S(16), lineHeight = DebuggerTheme.UiFont.Height;
+			// The glyph sits beside the first line.
+			int glyphTop = Height <= S(30) ? (Height - glyph) / 2 : S(6) + (lineHeight - glyph) / 2;
+			DebuggerTheme.Glyph(g, severity, new Rectangle(S(10), glyphTop, glyph, glyph));
+			var flags = Height <= S(30) ? TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine : TextFormatFlags.WordBreak | TextFormatFlags.EndEllipsis;
+			var bounds = Height <= S(30) ? new Rectangle(S(34), 0, Width - S(44), Height) : TextBounds;
+			DebuggerTheme.DrawText(g, Text, DebuggerTheme.UiFont, severity == Severity.Danger ? DebuggerTheme.Mix(DebuggerTheme.Red, Color.White, .2f) : DebuggerTheme.Text, bounds, flags);
 		}
 
 		protected override void Dispose(bool disposing) { if (disposing) tip.Dispose(); base.Dispose(disposing); }
@@ -803,6 +825,194 @@ namespace ReClassNET.Controls.Debugger
 			int glyph = S(14);
 			DebuggerTheme.Glyph(g, severity, new Rectangle(S(2), (Height - glyph) / 2, glyph, glyph));
 			DebuggerTheme.DrawText(g, Text, DebuggerTheme.UiFont, severity == Severity.Neutral ? DebuggerTheme.Muted : DebuggerTheme.Mix(DebuggerTheme.Accent(severity), Color.White, .25f), new Rectangle(S(22), 0, Width - S(24), Height), TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine);
+		}
+	}
+
+	/// <summary>
+	/// A thin divider the user drags to share space between two areas. It reports how far the pointer has moved since
+	/// the drag began; <see cref="ResizeTable"/> and <see cref="ResizeDocked"/> wire it to a layout.
+	/// </summary>
+	public class GripBar : DebuggerControl
+	{
+		private readonly Orientation orientation;
+		private bool hover, dragging;
+		private int origin;
+
+		public event Action DragStarted;
+		/// <summary>Pointer movement along the drag axis, in pixels, measured from where the drag began.</summary>
+		public event Action<int> Dragged;
+		public event Action DragFinished;
+
+		/// <param name="orientation">Horizontal: the bar lies between stacked areas and drags up and down.</param>
+		public GripBar(Orientation orientation)
+		{
+			this.orientation = orientation;
+			Margin = Padding.Empty;
+			TabStop = false;
+			Cursor = orientation == Orientation.Horizontal ? Cursors.HSplit : Cursors.VSplit;
+			if (orientation == Orientation.Horizontal) Height = S(8); else Width = S(8);
+		}
+
+		private bool Stacked => orientation == Orientation.Horizontal;
+
+		private int Pointer => Stacked ? MousePosition.Y : MousePosition.X;
+
+		protected override void OnMouseEnter(EventArgs e) { hover = true; Invalidate(); base.OnMouseEnter(e); }
+		protected override void OnMouseLeave(EventArgs e) { hover = false; Invalidate(); base.OnMouseLeave(e); }
+
+		protected override void OnMouseDown(MouseEventArgs e)
+		{
+			if (e.Button == MouseButtons.Left)
+			{
+				dragging = true; origin = Pointer; Capture = true; Invalidate();
+				DragStarted?.Invoke();
+			}
+			base.OnMouseDown(e);
+		}
+
+		protected override void OnMouseMove(MouseEventArgs e)
+		{
+			if (dragging) Dragged?.Invoke(Pointer - origin);
+			base.OnMouseMove(e);
+		}
+
+		protected override void OnMouseUp(MouseEventArgs e)
+		{
+			// The last move before release can be coalesced away; apply where the pointer actually stopped.
+			if (dragging) Dragged?.Invoke(Pointer - origin);
+			Finish();
+			base.OnMouseUp(e);
+		}
+		protected override void OnMouseCaptureChanged(EventArgs e) { if (!Capture) Finish(); base.OnMouseCaptureChanged(e); }
+
+		private void Finish()
+		{
+			if (!dragging) return;
+			dragging = false; Capture = false; Invalidate();
+			DragFinished?.Invoke();
+		}
+
+		protected override void OnPaint(PaintEventArgs e)
+		{
+			var g = e.Graphics;
+			g.Clear(BackColor);
+			DebuggerTheme.Smooth(g);
+			int length = S(44), thickness = S(4);
+			if (hover || dragging)
+			{
+				var line = Stacked ? new Rectangle(S(6), Height / 2, Width - S(12), 1) : new Rectangle(Width / 2, S(6), 1, Height - S(12));
+				using (var brush = new SolidBrush(DebuggerTheme.Mix(BackColor, DebuggerTheme.Teal, dragging ? .55f : .3f))) g.FillRectangle(brush, line);
+			}
+			var handle = Stacked
+				? new RectangleF((Width - length) / 2f, (Height - thickness) / 2f, length, thickness)
+				: new RectangleF((Width - thickness) / 2f, (Height - length) / 2f, thickness, length);
+			var color = dragging ? DebuggerTheme.Teal : hover ? DebuggerTheme.Mix(DebuggerTheme.Border, DebuggerTheme.Text, .5f) : DebuggerTheme.Mix(DebuggerTheme.Border, DebuggerTheme.Text, .18f);
+			DebuggerTheme.FillRounded(g, color, handle, thickness / 2f);
+		}
+
+		/// <summary>
+		/// Moves the boundary between the percent-sized rows (stacked) or columns on each side of this bar. The area
+		/// growing takes space from the nearest area on the other side, then the next one once that reaches
+		/// <paramref name="minimum"/> pixels.
+		/// </summary>
+		public void ResizeTable(TableLayoutPanel table, int minimum)
+		{
+			int[] start = null;
+			int[] before = null, after = null;
+			DragStarted += () =>
+			{
+				start = Stacked ? table.GetRowHeights() : table.GetColumnWidths();
+				int index = Stacked ? table.GetRow(this) : table.GetColumn(this);
+				before = PercentCells(table, Stacked, index, -1);
+				after = PercentCells(table, Stacked, index, +1);
+			};
+			Dragged += offset =>
+			{
+				if (start == null || before.Length == 0 || after.Length == 0 || offset == 0) return;
+				var sizes = (int[])start.Clone();
+				// Dragging down (or right) grows the nearest area before the bar and shrinks those after it.
+				var grow = offset > 0 ? before[0] : after[0];
+				int wanted = Math.Abs(offset), moved = 0;
+				foreach (int i in offset > 0 ? after : before)
+				{
+					int take = Math.Max(0, Math.Min(wanted - moved, sizes[i] - minimum));
+					sizes[i] -= take; moved += take;
+					if (moved == wanted) break;
+				}
+				sizes[grow] += moved;
+				SetPercents(table, Stacked, sizes.Select(v => (float)v).ToArray());
+			};
+		}
+
+		/// <summary>Percent-sized rows (or columns) from <paramref name="index"/> outwards in the direction of <paramref name="step"/>, nearest first.</summary>
+		private static int[] PercentCells(TableLayoutPanel table, bool rows, int index, int step)
+		{
+			int count = rows ? table.RowStyles.Count : table.ColumnStyles.Count;
+			var found = new List<int>();
+			for (int i = index + step; i >= 0 && i < count; i += step)
+				if (Percent(table, rows, i)) found.Add(i);
+			return found.ToArray();
+		}
+
+		/// <summary>The share of each row (or column), or 0 for those that are not percent-sized.</summary>
+		public static float[] Percents(TableLayoutPanel table, bool rows)
+		{
+			int count = rows ? table.RowStyles.Count : table.ColumnStyles.Count;
+			var shares = new float[count];
+			for (int i = 0; i < count; ++i)
+			{
+				TableLayoutStyle style = rows ? (TableLayoutStyle)table.RowStyles[i] : table.ColumnStyles[i];
+				if (style.SizeType == SizeType.Percent) shares[i] = rows ? ((RowStyle)style).Height : ((ColumnStyle)style).Width;
+			}
+			return shares;
+		}
+
+		/// <summary>Sets the percent-sized rows (or columns) in proportion to <paramref name="sizes"/>, normalised to 100.</summary>
+		public static void SetPercents(TableLayoutPanel table, bool rows, float[] sizes)
+		{
+			int count = rows ? table.RowStyles.Count : table.ColumnStyles.Count;
+			if (sizes == null || sizes.Length != count) return;
+			float total = 0;
+			for (int i = 0; i < count; ++i) if (Percent(table, rows, i)) total += Math.Max(0, sizes[i]);
+			if (total <= 0) return;
+			table.SuspendLayout();
+			for (int i = 0; i < count; ++i)
+			{
+				if (!Percent(table, rows, i)) continue;
+				float share = 100f * Math.Max(0, sizes[i]) / total;
+				if (rows) table.RowStyles[i].Height = share; else table.ColumnStyles[i].Width = share;
+			}
+			table.ResumeLayout(true);
+		}
+
+		private static bool Percent(TableLayoutPanel table, bool rows, int i) => (rows ? table.RowStyles[i].SizeType : table.ColumnStyles[i].SizeType) == SizeType.Percent;
+
+		/// <summary>
+		/// Resizes <paramref name="target"/>, a panel docked on one side of this bar in the same parent, keeping it and
+		/// the rest of the parent at least <paramref name="minimum"/> pixels.
+		/// </summary>
+		public void ResizeDocked(Control target, int minimum)
+		{
+			int start = 0;
+			int sign = target.Dock == DockStyle.Right || target.Dock == DockStyle.Bottom ? -1 : 1;
+			Func<int, int> clamp = size =>
+			{
+				var parent = target.Parent;
+				int room = parent == null ? size : (Stacked ? parent.ClientSize.Height - Height : parent.ClientSize.Width - Width) - minimum;
+				return Math.Max(minimum, Math.Min(Math.Max(minimum, room), size));
+			};
+			Action<int> set = size => { if (Stacked) target.Height = size; else target.Width = size; };
+			DragStarted += () => start = Stacked ? target.Height : target.Width;
+			Dragged += offset => set(clamp(start + sign * offset));
+			// A narrower window must not leave the panel wider than the space it shares.
+			EventHandler keep = (s, e) =>
+			{
+				var parent = target.Parent;
+				int space = Stacked ? parent.ClientSize.Height : parent.ClientSize.Width;
+				if (space >= minimum * 2 + (Stacked ? Height : Width)) set(clamp(Stacked ? target.Height : target.Width));
+			};
+			if (target.Parent != null) target.Parent.Resize += keep;
+			else target.ParentChanged += (s, e) => { if (target.Parent != null) target.Parent.Resize += keep; };
 		}
 	}
 }

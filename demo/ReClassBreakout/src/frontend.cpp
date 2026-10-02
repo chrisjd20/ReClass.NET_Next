@@ -4,6 +4,7 @@
 #include "tutorial.h"
 #include "scene.h"
 #include "ui.h"
+#include "selection.h"
 #include "raylib.h"
 #include <algorithm>
 #include <array>
@@ -207,15 +208,17 @@ float rich(const std::string& value, float x, float y, float width, float size, 
     while (at <= value.size()) {
         const auto end = value.find('\n', at);
         const std::string line = value.substr(at, end == std::string::npos ? std::string::npos : end - at);
+        // Drawn text is selectable; the first piece of each source line starts a new line when copied.
         if (code) {
             if (draw) {
                 DrawRectangleRec({x - 2, y - 2, width, lineHeight}, Color{12, 19, 29, 255});
-                text(line, x + 6, y + 1, size - 1, Teal, Face::Mono);
+                selectableText(line, x + 6, y + 1, size - 1, Teal, Face::Mono, y - 2, lineHeight, Join::Newline);
             }
             newline();
         } else {
             // Tokenize into words and backtick chips; chips never break.
             std::size_t i = 0;
+            Join join = Join::Newline;
             while (i < line.size()) {
                 if (line[i] == ' ') { ++i; continue; }
                 std::string token; bool chip = false;
@@ -234,20 +237,22 @@ float rich(const std::string& value, float x, float y, float width, float size, 
                 if (chip) while (i < line.size() && line[i] != ' ' && line[i] != '`') tail += line[i++];
                 const float tokenW = (chip ? textWidth(token, size - 1, Face::Bold) + 10 : textWidth(token, size)) + (tail.empty() ? 0 : textWidth(tail, size));
                 if (cx > x && cx + tokenW > x + width) newline();
+                const float top = y - (lineHeight - size) * .5f;
                 if (chip) {
                     const float chipW = textWidth(token, size - 1, Face::Bold) + 10;
                     if (draw) {
                         DrawRectangleRounded({cx, y - 1, chipW, size + 4}, .35f, 4, Color{26, 52, 60, 255});
                         DrawRectangleRoundedLinesEx({cx, y - 1, chipW, size + 4}, .35f, 4, 1, Fade(Teal, .6f));
-                        text(token, cx + 5, y + 1, size - 1, Teal, Face::Bold);
+                        selectableText(token, cx + 5, y + 1, size - 1, Teal, Face::Bold, top, lineHeight, join);
                     }
                     cx += chipW;
-                    if (!tail.empty()) { if (draw) text(tail, cx, y, size, color); cx += textWidth(tail, size); }
+                    if (!tail.empty()) { if (draw) selectableText(tail, cx, y, size, color, Face::Body, top, lineHeight, Join::Glue); cx += textWidth(tail, size); }
                 } else {
-                    if (draw) text(token, cx, y, size, color);
+                    if (draw) selectableText(token, cx, y, size, color, Face::Body, top, lineHeight, join);
                     cx += textWidth(token, size);
                 }
                 cx += textWidth(" ", size);
+                join = Join::Space;
             }
             if (!line.empty() && line.back() == ':' && end != std::string::npos) code = true;
             newline();
@@ -266,12 +271,14 @@ float showPanel(const std::string& value, float x, float y, float width, float s
     const float charW = std::max(1.0f, textWidth("0000000000", size, Face::Mono) / 10);
     const auto columns = static_cast<std::size_t>(std::max(8.0f, (width - 16) / charW));
     std::vector<std::string> lines;
+    std::vector<bool> continued;
     std::size_t at = 0;
     while (at <= value.size()) {
         const auto end = value.find('\n', at);
         std::string line = value.substr(at, end == std::string::npos ? std::string::npos : end - at);
-        while (line.size() > columns) { lines.push_back(line.substr(0, columns)); line = "  " + line.substr(columns); }
-        lines.push_back(line);
+        bool more = false;
+        while (line.size() > columns) { lines.push_back(line.substr(0, columns)); continued.push_back(more); more = true; line = "  " + line.substr(columns); }
+        lines.push_back(line); continued.push_back(more);
         if (end == std::string::npos) break;
         at = end + 1;
     }
@@ -279,11 +286,17 @@ float showPanel(const std::string& value, float x, float y, float width, float s
     DrawRectangleRounded({x, y, width, boxH}, .04f, 4, Color{9, 14, 22, 255});
     DrawRectangleRoundedLinesEx({x, y, width, boxH}, .04f, 4, 1, Border);
     float ly = y + 7;
-    for (const auto& line : lines) {
+    for (std::size_t i = 0; i < lines.size(); ++i) {
+        const auto& line = lines[i];
         const auto note = line.find("<-");
         const std::string head = line.substr(0, note);
-        text(head, x + 8, ly, size, Teal, Face::Mono);
-        if (note != std::string::npos) text(line.substr(note), x + 8 + textWidth(head, size, Face::Mono), ly, size, Gold, Face::Mono);
+        const float top = ly - (lineH - size) * .5f;
+        // A character-wrapped continuation copies back onto its line, without the two-space indent.
+        const std::size_t indent = continued[i] ? 2 : 0;
+        const Join lineJoin = continued[i] ? Join::Glue : Join::Newline;
+        const float indentW = indent ? textWidth("  ", size, Face::Mono) : 0;
+        if (head.size() > indent) selectableText(head.substr(indent), x + 8 + indentW, ly, size, Teal, Face::Mono, top, lineH, lineJoin);
+        if (note != std::string::npos) selectableText(line.substr(note), x + 8 + textWidth(head, size, Face::Mono), ly, size, Gold, Face::Mono, top, lineH, head.size() > indent ? Join::Glue : lineJoin);
         ly += lineH;
     }
     return y + boxH;
@@ -393,6 +406,10 @@ int runFrontend(int initialRoom, const std::string& attachmentDiagnostic, bool u
     bool menu = false, help = false, explain = false, quit = false, dirty = true, previousHot = false, recipeOpen = false;
     int tab = 0;
     Scroll fieldScroll, tutorialScroll, menuScroll, helpScroll, explainScroll;
+    // Drag-to-select text in the steps, memory and explain panes; Ctrl+C or right-click copies.
+    Selection stepsSelection, memorySelection, explainSelection;
+    long long selectionContext = -1;
+    bool beamCursor = false, explainBefore = false;
     std::uint64_t sequence = 0;
     double lastSave = GetTime(), toastUntil = 0, failUntil = 0, goUntil = 0, completeUntil = 0;
     std::string toast, previousTooltip;
@@ -434,6 +451,8 @@ int runFrontend(int initialRoom, const std::string& attachmentDiagnostic, bool u
         logAction(game, sequence, "reset");
     };
     while (!quit && !WindowShouldClose()) {
+        // A release that ends a text selection drag must not also click whatever is under the pointer.
+        releaseConsumed = IsMouseButtonReleased(MOUSE_BUTTON_LEFT) && (stepsSelection.dragging() || memorySelection.dragging() || explainSelection.dragging());
         // Scale the entire UI, including hit targets, instead of stretching
         // regions while leaving text tiny on a maximized/high-resolution window.
         ui::scale = std::clamp(std::min(GetScreenWidth() / 1280.0f, GetScreenHeight() / 800.0f), 1.0f, 2.5f);
@@ -469,6 +488,12 @@ int runFrontend(int initialRoom, const std::string& attachmentDiagnostic, bool u
             if (pressed(KEY_O)) perform(game.room() == 2 ? Action::ActivateReactor : Action::EvaluateDoor);
         }
         const bool overlay = menu || help || explain;
+        // Only the pane in front can be selected and copied from.
+        Selection* const activeSelection = explain ? &explainSelection : !overlay && progress.drawer ? (tab == 0 ? &stepsSelection : &memorySelection) : nullptr;
+        if (ctrl && pressed(KEY_C) && activeSelection) {
+            const auto copy = activeSelection->copied();
+            if (!copy.empty()) { SetClipboardText(copy.c_str()); notify("Copied: " + (copy.size() > 60 ? copy.substr(0, 57) + "..." : copy)); }
+        }
         Zone reach;
         const bool canUse = !overlay && game.interaction(reach);
         if (canUse && !ctrl && pressed(KEY_E)) perform(reach.action);
@@ -525,6 +550,11 @@ int runFrontend(int initialRoom, const std::string& attachmentDiagnostic, bool u
         }
         if (dirty && GetTime() - lastSave > .6) { progress.save(); dirty = false; lastSave = GetTime(); }
         const float font = static_cast<float>(progress.textSize);
+        // A new room, step, tab or text size lays the text out differently: start without a selection.
+        const long long context = ((static_cast<long long>(room) * 1000 + step) * 10 + tab) * 100 + progress.textSize;
+        if (context != selectionContext) { selectionContext = context; stepsSelection.clear(); memorySelection.clear(); }
+        if (explain && !explainBefore) explainSelection.clear();
+        explainBefore = explain;
         Ui ui;
         BeginDrawing();
         ClearBackground(Background);
@@ -668,7 +698,9 @@ int runFrontend(int initialRoom, const std::string& attachmentDiagnostic, bool u
             const Rectangle body{d.x + 14, d.y + 50, d.width - 22, d.height - (nextFooter ? 116.0f : 60.0f)};
             if (tab == 0) {
                 ui.clip = body;
+                stepsSelection.input(body, tutorialScroll.offset, !overlay);
                 tutorialScroll.begin(body, overlay);
+                stepsSelection.record(tutorialScroll.offset);
                 float ty = body.y - tutorialScroll.offset;
                 const float w = body.width - 12;
                 // Goal.
@@ -701,7 +733,7 @@ int runFrontend(int initialRoom, const std::string& attachmentDiagnostic, bool u
                         if (ui.hovered(row)) {
                             DrawRectangleRounded(row, .3f, 4, Color{26, 38, 54, 255});
                             ui.tooltip = "Go back to this step";
-                            if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) { step = i; dirty = true; }
+                            if (clicked()) { step = i; dirty = true; }
                         }
                         checkmark(body.x + 6, ty + 5, 12, Teal);
                         text(firstLine(current.text, w - 34, 13), body.x + 26, ty + 4, 13, Muted);
@@ -770,6 +802,7 @@ int runFrontend(int initialRoom, const std::string& attachmentDiagnostic, bool u
                 if (ui.button({body.x, ty, 130, 26}, "Copy steps", 12, false, "Copy this room's steps as plain text")) { const auto copy = instructions(lesson); SetClipboardText(copy.c_str()); notify("Steps copied."); }
                 ty += 34;
                 if (!progress.diagnostic.empty()) ty = paragraph(progress.diagnostic, body.x, ty, w, 12, Gold) + 10;
+                stepsSelection.finish();
                 tutorialScroll.end(body, ty);
                 ui.clip = {0, 0, screenW, screenH};
                 if (nextFooter) {
@@ -792,7 +825,9 @@ int runFrontend(int initialRoom, const std::string& attachmentDiagnostic, bool u
                 if (ui.button({body.x + half + 8, body.y, half, 30}, "Hex values", 12, progress.hex, "Compare raw field bytes with the typed value")) { progress.hex = !progress.hex; dirty = true; }
                 const Rectangle fieldsBody{body.x, body.y + 42, body.width, body.height - 42};
                 ui.clip = fieldsBody;
+                memorySelection.input(fieldsBody, fieldScroll.offset, !overlay);
                 fieldScroll.begin(fieldsBody, overlay);
+                memorySelection.record(fieldScroll.offset);
                 float fy = fieldsBody.y - fieldScroll.offset;
                 fy = paragraph("Answer key for checking your work. Every step can be done with ReClass alone.", fieldsBody.x, fy, fieldsBody.width - 12, 12, Muted) + 12;
                 auto visibleFields = game.fields();
@@ -838,6 +873,7 @@ int runFrontend(int initialRoom, const std::string& attachmentDiagnostic, bool u
                     }
                     if (!teaching.signaturePattern.empty()) fy = paragraph("Pattern: " + teaching.signaturePattern, fieldsBody.x, fy, fieldsBody.width - 12, 12, Blue) + 10;
                 }
+                memorySelection.finish();
                 fieldScroll.end(fieldsBody, fy);
                 ui.clip = {0, 0, screenW, screenH};
             }
@@ -869,7 +905,7 @@ int runFrontend(int initialRoom, const std::string& attachmentDiagnostic, bool u
                 if (progress.completed[i]) { checkmark(tile.x + 14, tile.y + 62, 12, Teal); text("COMPLETE", tile.x + 32, tile.y + 62, 11, Teal, Face::Bold); }
                 const std::string key = i == 0 ? "Shift+F12" : i == 13 ? "Shift+F1" : "F" + std::to_string(i);
                 text(key, tile.x + tile.width - textWidth(key, 11) - 12, tile.y + 63, 11, Muted);
-                if (hover && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) selectRoom(i);
+                if (hover && clicked()) selectRoom(i);
                 endY = std::max(endY, tile.y + tile.height + 12);
             }
             menuScroll.end(menuBody, endY);
@@ -886,7 +922,9 @@ int runFrontend(int initialRoom, const std::string& attachmentDiagnostic, bool u
             if (ui.button({surface.x + surface.width - 136, surface.y + 22, 112, 34}, "Close (Esc)", 13)) explain = false;
             const Rectangle explainBody{surface.x + 28, surface.y + 84, surface.width - 44, surface.height - 100};
             ui.clip = explainBody;
+            explainSelection.input(explainBody, explainScroll.offset, true);
             explainScroll.begin(explainBody, false);
+            explainSelection.record(explainScroll.offset);
             float ey = explainBody.y - explainScroll.offset;
             const float ew = explainBody.width - 24, body = font + 1;
             for (std::size_t i = 0; i < lesson.explain.size(); ++i) {
@@ -895,7 +933,7 @@ int runFrontend(int initialRoom, const std::string& attachmentDiagnostic, bool u
                 DrawCircleV({explainBody.x + 13, ey + 13}, 13, Fade(Teal, .18f));
                 const std::string number = std::to_string(i + 1);
                 text(number, explainBody.x + 13 - textWidth(number, 14, Face::Bold) * .5f, ey + 5, 14, Teal, Face::Bold);
-                text(section.title, explainBody.x + 36, ey + 1, body + 5, Teal, Face::Bold);
+                selectableText(section.title, explainBody.x + 36, ey + 1, body + 5, Teal, Face::Bold, ey - 2, body + 12, Join::Newline);
                 ey += body + 18;
                 std::size_t at = 0;
                 while (at < section.text.size()) {
@@ -918,7 +956,7 @@ int runFrontend(int initialRoom, const std::string& attachmentDiagnostic, bool u
                         DrawRectangleRounded({explainBody.x + 36, ey, ew - 36, boxH}, .04f, 4, Color{9, 14, 22, 255});
                         DrawRectangleRoundedLinesEx({explainBody.x + 36, ey, ew - 36, boxH}, .04f, 4, 1, Border);
                         float ly = ey + 10;
-                        for (const auto& content : lines) { text(content, explainBody.x + 50, ly, body - 1, Teal, Face::Mono); ly += lineH; }
+                        for (const auto& content : lines) { selectableText(content, explainBody.x + 50, ly, body - 1, Teal, Face::Mono, ly - (lineH - body + 1) * .5f, lineH, Join::Newline); ly += lineH; }
                         ey += boxH + 14;
                     } else if (block.rfind("- ", 0) == 0) {
                         std::size_t line = 0;
@@ -947,6 +985,7 @@ int runFrontend(int initialRoom, const std::string& attachmentDiagnostic, bool u
                 ey += 18;
                 if (i + 1 < lesson.explain.size()) { DrawLineEx({explainBody.x + 36, ey - 12}, {explainBody.x + ew, ey - 12}, 1, Border); ey += 6; }
             }
+            explainSelection.finish();
             explainScroll.end(explainBody, ey + 10);
             ui.clip = {0, 0, screenW, screenH};
         } else if (help) {
@@ -958,7 +997,7 @@ int runFrontend(int initialRoom, const std::string& attachmentDiagnostic, bool u
             const Rectangle helpBody{surface.x + 20, surface.y + 61, surface.width - 40, surface.height - 124};
             helpScroll.begin(helpBody, false);
             float hy = helpBody.y - helpScroll.offset;
-            hy = paragraph("WASD / arrows   move\nMouse + click / Space   aim and shoot\nE   use the console you're standing at\nTab   show or hide the steps\nEscape   room select (completed rooms and the next one)\nCtrl+R   restart the room (gameplay data only)\nCtrl+Q   quit    A- / A+   text size", helpBody.x, hy, helpBody.width, font, Ink) + 18;
+            hy = paragraph("WASD / arrows   move\nMouse + click / Space   aim and shoot\nE   use the console you're standing at\nTab   show or hide the steps\nEscape   room select (completed rooms and the next one)\nCtrl+R   restart the room (gameplay data only)\nDrag over step text   select it (double-click: one word or address)\nCtrl+C / right-click   copy the selection\nCtrl+Q   quit    A- / A+   text size", helpBody.x, hy, helpBody.width, font, Ink) + 18;
             hy = paragraph("Attach ReClass to ReClassBreakout, PID " + std::to_string(processId()) + ".", helpBody.x, hy, helpBody.width, font, Ink) + 8;
             hy = paragraph(attachmentDiagnostic, helpBody.x, hy, helpBody.width, font - 1, Gold) + 12;
             hy = paragraph("Values changed from outside the game flash violet: MEMORY WRITE DETECTED. A ReClass debugger pause freezes this window until you Resume in ReClass. Restart room never restores patched code; use Restore original or Restore all in ReClass.", helpBody.x, hy, helpBody.width, font - 1, Muted) + 12;
@@ -985,6 +1024,13 @@ int runFrontend(int initialRoom, const std::string& attachmentDiagnostic, bool u
             DrawRectangleRounded(rect, .1f, 4, Color{35, 76, 69, 240});
             paragraph(toast, rect.x + 12, rect.y + 8, width - 24, 13, Ink);
         }
+        // Right-click copies the selection, or the word or address under the pointer.
+        if (activeSelection && IsMouseButtonReleased(MOUSE_BUTTON_RIGHT)) {
+            const auto copy = activeSelection->copyAt(mouse());
+            if (!copy.empty()) { SetClipboardText(copy.c_str()); notify("Copied: " + (copy.size() > 60 ? copy.substr(0, 57) + "..." : copy)); }
+        }
+        const bool beam = activeSelection && !ui.hot && (activeSelection->dragging() || activeSelection->over(mouse()));
+        if (beam != beamCursor) { beamCursor = beam; SetMouseCursor(beam ? MOUSE_CURSOR_IBEAM : MOUSE_CURSOR_DEFAULT); }
         previousHot = ui.hot;
         EndMode2D();
         EndDrawing();

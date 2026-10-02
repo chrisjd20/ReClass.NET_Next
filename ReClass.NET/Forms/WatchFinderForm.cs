@@ -74,9 +74,11 @@ namespace ReClassNET.Forms
         private int confirmedRows,unlikelyRows,candidateRows;
         private int lastDetails;
         private volatile bool accepting;
-        private bool closing,closePending,confirmPending,userPicked;
+        private bool closing,closePending,confirmPending,userPicked,cleanupFailed;
         private IDictionary<string,ulong> shownRegisters;
         private FlowLayoutPanel toolbar;
+        // Where the user last dragged the divider, kept for the next watch window in this session.
+        private static float[] savedSplit;
         public WatchFinderForm(DebugWorkspace workspace,ulong address,int length,bool writeOnly,bool execution=false,bool boundaryKnown=false)
         {
             this.workspace=workspace;this.address=address;this.length=length;this.writeOnly=writeOnly;this.execution=execution;this.boundaryKnown=boundaryKnown;
@@ -100,9 +102,14 @@ namespace ReClassNET.Forms
             explainView.EmptyText="Select a row to see its instruction explained in plain English.";
             registerBoard.FollowRequested+=FollowRegisterTile;
             inspector.AddPage("Explain",explainView);inspector.AddPage("Registers",registerBoard);inspector.AddPage("Raw",Framed(details));
-            var split=new SplitContainer{Dock=DockStyle.Fill,Orientation=Orientation.Horizontal,SplitterWidth=DpiUtil.ScaleIntY(6),BackColor=DebuggerTheme.Background};
-            split.Panel1.Padding=new Padding(DpiUtil.ScaleIntX(8),DpiUtil.ScaleIntY(2),DpiUtil.ScaleIntX(8),0);split.Panel2.Padding=new Padding(DpiUtil.ScaleIntX(8),0,DpiUtil.ScaleIntX(8),DpiUtil.ScaleIntY(6));
-            split.Panel1.Controls.Add(Framed(grid));split.Panel2.Controls.Add(Framed(inspector));
+            // Hits on top, the inspector below; the divider between them can be dragged.
+            var split=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=1,RowCount=3,BackColor=DebuggerTheme.Background,Padding=new Padding(DpiUtil.ScaleIntX(8),DpiUtil.ScaleIntY(2),DpiUtil.ScaleIntX(8),DpiUtil.ScaleIntY(6))};
+            split.RowStyles.Add(new RowStyle(SizeType.Percent,46));split.RowStyles.Add(new RowStyle(SizeType.Absolute,DpiUtil.ScaleIntY(8)));split.RowStyles.Add(new RowStyle(SizeType.Percent,54));
+            var grip=new GripBar(Orientation.Horizontal){Dock=DockStyle.Fill};
+            grip.ResizeTable(split,DpiUtil.ScaleIntY(120));grip.DragFinished+=()=>savedSplit=GripBar.Percents(split,true);
+            var gridFrame=Framed(grid);var inspectorFrame=Framed(inspector);gridFrame.Margin=inspectorFrame.Margin=Padding.Empty;
+            split.Controls.Add(gridFrame,0,0);split.Controls.Add(grip,0,1);split.Controls.Add(inspectorFrame,0,2);
+            GripBar.SetPercents(split,true,savedSplit);
 
             var toolbar=new FlowLayoutPanel{Dock=DockStyle.Top,AutoSize=true,AutoSizeMode=AutoSizeMode.GrowAndShrink,WrapContents=true,BackColor=DebuggerTheme.Background,Padding=new Padding(DpiUtil.ScaleIntX(6),DpiUtil.ScaleIntY(2),DpiUtil.ScaleIntX(6),DpiUtil.ScaleIntY(2))};
             var collect=Group(toolbar,"Collect");
@@ -114,7 +121,7 @@ namespace ReClassNET.Forms
             tips.SetToolTip(condition,"Optional filter, checked on every hit. Example: mem32(rax + 0x1C) == 1");
             tips.SetToolTip(pauseMatch,"Freeze the game at the moment a hit matches, so you can read and step through the registers.");
             filter.Controls.Add(conditionLabel);filter.Controls.Add(condition);filter.Controls.Add(pauseMatch);
-            applyConditionButton=Add(filter,"Apply condition",Resources.B16x16_Accept,DarkButtonStyle.Secondary,async()=>await StartAsync(),"Restart the watch with this condition and Pause on match setting.");
+            applyConditionButton=Add(filter,"Apply condition",Resources.B16x16_Accept,DarkButtonStyle.Secondary,ApplyConditionAsync,"Restart the watch with this condition and Pause on match setting. Rows recorded under a different condition are cleared.");
             var found=Group(toolbar,"Found code");
             Add(found,"Confirm next execution",Resources.B16x16_Accept,DarkButtonStyle.Primary,ConfirmAsync,"Checks the selected row really is the instruction, the next time it runs. A real instruction turns CONFIRMED.");
             Add(found,"Inspect / edit",Resources.B16x16_Page_Code,DarkButtonStyle.Secondary,async()=>{
@@ -140,11 +147,10 @@ namespace ReClassNET.Forms
 
             Controls.Add(split);Controls.Add(status);Controls.Add(toolbar);Controls.Add(coach);Controls.Add(header);
             this.toolbar=toolbar;ApplyTheme();
-            Load+=(s,e)=>{try{split.SplitterDistance=Math.Max(DpiUtil.ScaleIntY(160),(int)(split.Height*0.46));}catch(InvalidOperationException){}};
             grid.SelectionChanged+=(s,e)=>ShowDetails();grid.MouseDown+=(s,e)=>userPicked=true;grid.KeyDown+=(s,e)=>userPicked=true;timer.Tick+=(s,e)=>{Flush();UpdateDebugButtons();UpdateGuidance();};timer.Start();
             condition.TextChanged+=(s,e)=>ConditionEdited();pauseMatch.CheckedChanged+=(s,e)=>ConditionEdited();
-            workspace.Session.Diagnostic+=SessionDiagnostic;
-            FormClosed+=(s,e)=>{workspace.Session.Diagnostic-=SessionDiagnostic;tips.Dispose();GlobalWindowManager.RemoveWindow(this);};
+            workspace.Session.Diagnostic+=SessionDiagnostic;workspace.Session.WatchStopped+=SessionWatchStopped;
+            FormClosed+=(s,e)=>{workspace.Session.Diagnostic-=SessionDiagnostic;workspace.Session.WatchStopped-=SessionWatchStopped;tips.Dispose();GlobalWindowManager.RemoveWindow(this);};
             FormClosing+=CloseWatchCollection;Shown+=async(s,e)=>{await this.actions.WaitAsync();try{if(!closePending)await StartAsync();}catch(Exception error){if(!IsDisposed)status.Text=error.Message;}finally{this.actions.Release();}};
             UpdateGuidance();
         }
@@ -189,13 +195,18 @@ namespace ReClassNET.Forms
         {
             if(IsDisposed||closePending||pauseButton==null)return;
             var state=workspace.Session.State;bool idle=actions.CurrentCount!=0;bool hasRow=grid.SelectedRows.Count>0;
-            pauseButton.Enabled=idle&&(state==DebugSessionState.Running||state==DebugSessionState.Detached);
+            // Once the game has exited (or ReClass attached to a new one) nothing here can reach it any more.
+            bool live=!workspace.SessionEnded;
+            if(!live&&watchIds.Count>0){watchIds.Clear();accepting=false;confirmPending=false;}
+            pauseButton.Enabled=live&&idle&&(state==DebugSessionState.Running||state==DebugSessionState.Detached);
             bool held=state==DebugSessionState.Paused&&workspace.Session.HeldPaused;
-            resumeButton.Enabled=idle&&held;stepButton.Enabled=idle&&hasRow&&(state==DebugSessionState.Paused||state==DebugSessionState.Running);
-            applyConditionButton.Enabled=idle&&(condition.Text!=appliedCondition||pauseMatch.Checked!=appliedPause);
+            // Stepping a thread of a running game can wait on a sleeping thread; only offer it while the game is held.
+            resumeButton.Enabled=live&&idle&&held;stepButton.Enabled=live&&idle&&hasRow&&held;
+            applyConditionButton.Enabled=live&&idle&&(condition.Text!=appliedCondition||pauseMatch.Checked!=appliedPause);
+            buttons["Start"].Enabled=buttons["Stop"].Enabled=live&&idle;
             // Row actions already ignore clicks without a selection; disabling them makes that visible.
             foreach(var name in new[]{"Confirm next execution","Inspect / edit","Find accessed addresses","Follow data","Follow register…","Trace selected thread"})
-                buttons[name].Enabled=idle&&hasRow;
+                buttons[name].Enabled=live&&idle&&hasRow;
         }
         // The header pills, the "what next" coach and the glowing button all follow the current state.
         private void UpdateGuidance()
@@ -207,11 +218,12 @@ namespace ReClassNET.Forms
             bool held=state==DebugSessionState.Paused&&workspace.Session.HeldPaused;
             if(confirmed>0)confirmPending=false;
             var selected=Selected();
-            var advice=WatchCoach.For(new WatchCoachState{Execution=execution,WriteOnly=writeOnly,Collecting=watchIds.Count>0,ConfirmPending=confirmPending,Paused=held,Detached=state==DebugSessionState.Detached,
+            var advice=WatchCoach.For(new WatchCoachState{Ended=workspace.SessionEnded,Execution=execution,WriteOnly=writeOnly,Collecting=watchIds.Count>0,ConfirmPending=confirmPending,Paused=held,Detached=state==DebugSessionState.Detached,
                 Rows=rows,Confirmed=confirmed,Unlikely=unlikely,Candidates=candidates,Selected=selected==null?(HitKind?)null:HitKinds.From(selected.Status,selected.Confirmed)});
             coach.Show(advice);
             foreach(var pair in buttons)pair.Value.Glow=pair.Key==advice.Button&&pair.Value.Enabled;
-            header.SetPills(SessionPill(held?DebugSessionState.Paused:state==DebugSessionState.Paused?DebugSessionState.Running:state),new DebuggerHeader.HeaderPill{Text=rows+(rows==1?" ROW":" ROWS")+" · "+hits+(hits==1?" HIT":" HITS"),Severity=Severity.Neutral});
+            if(workspace.Session.IsDisposed)header.SetPills(new DebuggerHeader.HeaderPill{Text="SESSION ENDED",Severity=Severity.Danger},new DebuggerHeader.HeaderPill{Text=rows+(rows==1?" ROW":" ROWS")+" · "+hits+(hits==1?" HIT":" HITS"),Severity=Severity.Neutral});
+            else header.SetPills(SessionPill(held?DebugSessionState.Paused:state==DebugSessionState.Paused?DebugSessionState.Running:state),new DebuggerHeader.HeaderPill{Text=rows+(rows==1?" ROW":" ROWS")+" · "+hits+(hits==1?" HIT":" HITS"),Severity=Severity.Neutral});
             bool animate=rows==0;
             foreach(var look in looks.Values)if(look.FlashUntil-Environment.TickCount>0){animate=true;break;}
             if(animate)grid.Invalidate();
@@ -238,7 +250,40 @@ namespace ReClassNET.Forms
         }
         private void SessionDiagnostic(string message)
         {
+            // A stopped watch is reported through WatchStopped, only to the window that owns it.
+            if(message!=null&&message.StartsWith("Watch stopped",StringComparison.Ordinal))return;
             if(diagnostics.Count<64)diagnostics.Enqueue(message);
+        }
+        private void SessionWatchStopped(Guid id,string reason)
+        {
+            if(IsDisposed||!IsHandleCreated)return;
+            try{BeginInvoke(new Action(()=>{if(IsDisposed||!watchIds.Remove(id))return;if(watchIds.Count==0)accepting=false;status.Text="Watch stopped: "+reason+" Start watches again.";UpdateDebugButtons();UpdateGuidance();}));}catch(InvalidOperationException){}
+        }
+        private async Task ApplyConditionAsync()
+        {
+            // Check the text first, so a typo leaves the running watch alone.
+            try{WatchCondition.Parse(condition.Text);}
+            catch(Exception error){status.Text="Condition not applied: "+error.Message.TrimEnd('.')+". The previous watch keeps running.";return;}
+            bool changed=condition.Text!=appliedCondition;
+            await StopAsync();
+            int cleared=changed?ClearRows():0;
+            await StartAsync();
+            if(cleared>0)status.Text="Condition applied. Cleared "+cleared+(cleared==1?" row":" rows")+" recorded before it, so every row now matches.";
+            else status.Text=changed?"Condition applied.":"Pause on match updated.";
+        }
+        // Forgets every row: they were recorded under settings that no longer apply.
+        private int ClearRows()
+        {
+            int count;
+            lock(records)
+            {
+                count=records.Count;records.Clear();pendingKeys.Clear();string key;while(dirty.TryDequeue(out key)){}
+                confirmedRows=unlikelyRows=candidateRows=0;totalHits=0;
+            }
+            displayed.Clear();looks.Clear();grid.Rows.Clear();userPicked=false;
+            explainView.SetItems(null);registerBoard.SetRegisters(null,null);details.Text="";
+            inspector.SetBadge(0,null,Severity.Neutral);inspector.SetBadge(1,null,Severity.Neutral);
+            return count;
         }
         private async Task StartAsync()
         {
@@ -252,7 +297,14 @@ namespace ReClassNET.Forms
         private async Task StopAsync()
         {
             accepting=false;confirmPending=false;
-            foreach(var id in watchIds.ToArray()){await workspace.Session.StopWatchAsync(id);watchIds.Remove(id);}
+            // An exited game has no watches left to remove, and a shut-down session can't be asked to.
+            if(workspace.SessionEnded){watchIds.Clear();status.Text="Collection stopped.";return;}
+            foreach(var id in watchIds.ToArray())
+            {
+                try{await workspace.Session.StopWatchAsync(id);}
+                catch(ObjectDisposedException){}
+                watchIds.Remove(id);
+            }
             status.Text="Collection stopped.";
         }
         private void CaptureHit(WatchHit hit)
@@ -425,9 +477,9 @@ namespace ReClassNET.Forms
         {
             var instruction=row.Latest.Candidates.FirstOrDefault(c=>c.Address==row.Code);
             var used=instruction==null?Enumerable.Empty<string>():instruction.UsedRegisters.Where(r=>r.Register!=Iced.Intel.Register.None).Select(r=>Iced.Intel.RegisterExtensions.GetFullRegister(r.Register).ToString().ToLowerInvariant());
-            var views=RegisterHighlights.Build(snapshot.Registers,stepped?null:used,row.Address,row.Width,previous);
-            string caption=(stepped?"AFTER ONE STEP":snapshot.Phase.ToString().ToUpperInvariant()+" THE INSTRUCTION RAN")+" · THREAD "+snapshot.ThreadId+" · "+snapshot.Timestamp.ToLocalTime().ToString("T")+" · CLICK A TILE TO FOLLOW IT";
-            if(snapshot.Phase==SnapshotPhase.After&&!stepped)caption="AFTER THE INSTRUCTION RAN · THREAD "+snapshot.ThreadId+" · "+snapshot.Timestamp.ToLocalTime().ToString("T")+" · CLICK A TILE TO FOLLOW IT";
+            var views=RegisterHighlights.Build(snapshot.Registers,stepped?null:used,row.Address,row.Width,previous,workspace.LooksLikeAddress);
+            string caption=(stepped?"AFTER ONE STEP":snapshot.Phase.ToString().ToUpperInvariant()+" THE INSTRUCTION RAN")+" · THREAD "+snapshot.ThreadId+" · "+snapshot.Timestamp.ToLocalTime().ToString("T")+" · CLICK AN ADDRESS TO FOLLOW IT";
+            if(snapshot.Phase==SnapshotPhase.After&&!stepped)caption="AFTER THE INSTRUCTION RAN · THREAD "+snapshot.ThreadId+" · "+snapshot.Timestamp.ToLocalTime().ToString("T")+" · CLICK AN ADDRESS TO FOLLOW IT";
             registerBoard.SetRegisters(views,caption);
             int watched=views.Count(v=>v.PointsAtWatched);
             inspector.SetBadge(1,stepped?"STEPPED":watched>0?watched+" -> DATA":null,stepped?Severity.Info:Severity.Attention);
@@ -469,9 +521,10 @@ namespace ReClassNET.Forms
         }
         private void Follow(ulong pointer,RegisterSnapshot snapshot)
         {
-            if(snapshot.SessionId!=workspace.Session.Id||workspace.Session.State==DebugSessionState.Exited)throw new InvalidOperationException("Captured session is stale.");
-            if(pointer==0)throw new InvalidOperationException("Captured pointer is zero/unavailable.");
-            workspace.Target.ReadExact(pointer,1);LinkedWindowFeatures.CreateClassAtAddress(new IntPtr(unchecked((long)pointer)),true);
+            if(snapshot.SessionId!=workspace.Session.Id||workspace.SessionEnded)throw new InvalidOperationException("This capture belongs to a game session that has ended, so its memory can't be opened.");
+            if(pointer==0)throw new InvalidOperationException("The value is 0, so there is no memory to open.");
+            if(!workspace.LooksLikeAddress(pointer))throw new InvalidOperationException("0x"+pointer.ToString("X")+" ("+pointer.ToString("N0",System.Globalization.CultureInfo.InvariantCulture)+" in decimal) isn't an address in the game's memory, so there is nothing to open. It is probably a plain number.");
+            LinkedWindowFeatures.CreateClassAtAddress(new IntPtr(unchecked((long)pointer)),true);
         }
         private Task FollowRegisterAsync()
         {
@@ -527,11 +580,19 @@ namespace ReClassNET.Forms
         private static string Csv(string text)=>"\""+text.Replace("\"","\"\"")+"\"";
         private async void CloseWatchCollection(object sender,FormClosingEventArgs e)
         {
-            if(closing)return;e.Cancel=true;if(closePending)return;closePending=true;accepting=false;traceCancellation.Cancel();
+            // A second close after a failed cleanup always closes: the window must never be stuck open.
+            if(closing||cleanupFailed)return;e.Cancel=true;if(closePending)return;closePending=true;accepting=false;traceCancellation.Cancel();
             await actions.WaitAsync();
-            try{await StopAsync();closing=true;timer.Stop();timer.Dispose();traceCancellation.Dispose();Close();}
-            catch(Exception error){closePending=false;status.Text="Close cancelled: "+error.Message;}
+            bool close=true;
+            try{await StopAsync();}
+            catch(Exception error)
+            {
+                // The game is still attached and a watch may still be armed: say so once, then let the next close through.
+                close=workspace.SessionEnded;
+                if(!close){cleanupFailed=true;closePending=false;status.Text="Couldn't remove this window's watch: "+error.Message+" Close again to close anyway.";}
+            }
             finally{actions.Release();}
+            if(close){closing=true;timer.Stop();timer.Dispose();traceCancellation.Dispose();Close();}
         }
         protected override void OnLoad(EventArgs e){base.OnLoad(e);GlobalWindowManager.AddWindow(this);}
     }

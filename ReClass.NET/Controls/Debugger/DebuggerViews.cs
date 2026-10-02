@@ -140,6 +140,21 @@ namespace ReClassNET.Controls.Debugger
 
 		private int BytesWidth => items.Count == 0 ? 0 : items.Max(i => Math.Min(i.Bytes.Length, 10)) * (DebuggerTheme.Measure("00", DebuggerTheme.MonoSmall).Width + S(11));
 
+		private int AsmLeft => S(18) + DebuggerTheme.Measure("00007FF000000000", DebuggerTheme.MonoSmall).Width + S(12) + Math.Max(BytesWidth, S(40)) + S(14);
+
+		private int BadgesWidth(ListedInstruction item) => item.Badges.Sum(b => DebuggerTheme.PillWidth(b.Text) + S(6));
+
+		private static List<AsmToken> TokensOf(ListedInstruction item) => item.Tokens.Count > 0 ? item.Tokens : AsmTokens.Tokenize(item.Text);
+
+		// When the row is too narrow for the instruction beside its bytes, it moves to a line of its own instead of being cut short.
+		private bool AsmOnOwnLine(ListedInstruction item, int width)
+		{
+			int room = width - S(24) - BadgesWidth(item) - AsmLeft;
+			return DebuggerTheme.Measure(string.Concat(TokensOf(item).Select(t => t.Text)), DebuggerTheme.MonoBold).Width > room;
+		}
+
+		private int AsmLineHeight => DebuggerTheme.ChipHeight() + S(4);
+
 		protected override int Arrange(int width)
 		{
 			heights.Clear();
@@ -148,6 +163,7 @@ namespace ReClassNET.Controls.Debugger
 			foreach (var item in items)
 			{
 				int h = DebuggerTheme.ChipHeight() + S(10);
+				if (AsmOnOwnLine(item, width)) h += AsmLineHeight;
 				if (!string.IsNullOrEmpty(item.Explanation))
 					h += TextRenderer.MeasureText(item.Explanation, DebuggerTheme.UiFont, new Size(Math.Max(50, width - textLeft - S(16)), int.MaxValue), TextFormatFlags.WordBreak | TextFormatFlags.NoPadding).Height + S(6);
 				heights.Add(h);
@@ -190,16 +206,20 @@ namespace ReClassNET.Controls.Debugger
 				if (item.Bytes.Length > 10) DebuggerTheme.DrawText(g, "+" + (item.Bytes.Length - 10), DebuggerTheme.UiSmall, DebuggerTheme.Muted, bx, lineY + S(2));
 				x += Math.Max(bytesWidth, S(40)) + S(14);
 
-				int badgesWidth = item.Badges.Sum(b => DebuggerTheme.PillWidth(b.Text) + S(6));
-				var tokens = item.Tokens.Count > 0 ? item.Tokens : AsmTokens.Tokenize(item.Text);
-				AsmTokens.Draw(g, tokens, DebuggerTheme.MonoBold, x, lineY + S(1), width - S(24) - badgesWidth, item.Dim ? .55f : 0f);
+				int badgesWidth = BadgesWidth(item);
+				bool ownLine = AsmOnOwnLine(item, width);
+				int asmY = lineY + DebuggerTheme.ChipHeight() + S(5);
+				// Badges stay beside the bytes when there is room, otherwise they move down next to the instruction.
+				int badgesY = ownLine && width - S(16) - badgesWidth < bx + S(8) ? asmY : lineY + S(1);
+				if (ownLine) AsmTokens.Draw(g, TokensOf(item), DebuggerTheme.MonoBold, S(18), asmY, width - S(24) - (badgesY == asmY ? badgesWidth : 0), item.Dim ? .55f : 0f);
+				else AsmTokens.Draw(g, TokensOf(item), DebuggerTheme.MonoBold, x, lineY + S(1), width - S(24) - badgesWidth, item.Dim ? .55f : 0f);
 				int px = width - S(16) - badgesWidth;
 				foreach (var badge in item.Badges)
-					px += DebuggerTheme.Pill(g, badge.Text, badge.Tone == Severity.Neutral ? DebuggerTheme.Muted : DebuggerTheme.Accent(badge.Tone), px, lineY + S(1), badge.Tone == Severity.Success) + S(6);
+					px += DebuggerTheme.Pill(g, badge.Text, badge.Tone == Severity.Neutral ? DebuggerTheme.Muted : DebuggerTheme.Accent(badge.Tone), px, badgesY, badge.Tone == Severity.Success) + S(6);
 
 				if (!string.IsNullOrEmpty(item.Explanation))
 				{
-					int ey = lineY + DebuggerTheme.ChipHeight() + S(6);
+					int ey = lineY + DebuggerTheme.ChipHeight() + S(6) + (ownLine ? AsmLineHeight : 0);
 					DebuggerTheme.DrawText(g, item.Explanation, DebuggerTheme.UiFont, item.Dim ? DebuggerTheme.Faint : DebuggerTheme.Muted, new Rectangle(S(18), ey, width - S(34), h - (ey - y)), TextFormatFlags.WordBreak);
 				}
 				y += h + S(6);
@@ -276,8 +296,8 @@ namespace ReClassNET.Controls.Debugger
 			if (index != hover)
 			{
 				hover = index;
-				Cursor = index >= 0 ? Cursors.Hand : Cursors.Default;
-				tip.SetToolTip(this, index >= 0 ? "Click to open the memory " + registers[index].Name.ToUpperInvariant() + " points at, as a class (current memory)." : "");
+				Cursor = index >= 0 && registers[index].LooksLikeAddress ? Cursors.Hand : Cursors.Default;
+				tip.SetToolTip(this, index >= 0 ? registers[index].Describe() : "");
 				Invalidate();
 			}
 			base.OnMouseMove(e);
@@ -288,7 +308,8 @@ namespace ReClassNET.Controls.Debugger
 		protected override void OnMouseClick(MouseEventArgs e)
 		{
 			int index = HitTest(e.Location);
-			if (index >= 0 && e.Button == MouseButtons.Left) FollowRequested?.Invoke(registers[index]);
+			// Only addresses can be opened; a plain number explains itself in the tooltip instead.
+			if (index >= 0 && e.Button == MouseButtons.Left && registers[index].LooksLikeAddress) FollowRequested?.Invoke(registers[index]);
 			base.OnMouseClick(e);
 		}
 
@@ -302,7 +323,8 @@ namespace ReClassNET.Controls.Debugger
 				DebuggerTheme.Smooth(g);
 				var accent = reg.PointsAtWatched ? DebuggerTheme.Amber : reg.IsInstructionPointer ? DebuggerTheme.Violet : reg.Used ? DebuggerTheme.Teal : DebuggerTheme.Border;
 				bool highlighted = reg.PointsAtWatched || reg.Used || reg.IsInstructionPointer;
-				var fill = i == hover ? DebuggerTheme.Hover : highlighted ? DebuggerTheme.Mix(DebuggerTheme.Raised, accent, .1f) : DebuggerTheme.Raised;
+				bool hot = i == hover && reg.LooksLikeAddress;
+				var fill = hot ? DebuggerTheme.Hover : highlighted ? DebuggerTheme.Mix(DebuggerTheme.Raised, accent, .1f) : DebuggerTheme.Raised;
 				DebuggerTheme.FillRounded(g, fill, t, S(6));
 				DebuggerTheme.StrokeRounded(g, highlighted ? Color.FromArgb(170, accent) : DebuggerTheme.Border, t, S(6));
 
@@ -319,7 +341,16 @@ namespace ReClassNET.Controls.Debugger
 					px -= S(4);
 				}
 				var value = "0x" + reg.Value.ToString("X16");
-				DebuggerTheme.DrawText(g, value, reg.Changed ? DebuggerTheme.MonoBold : DebuggerTheme.Mono, reg.Changed ? DebuggerTheme.Text : DebuggerTheme.Mix(DebuggerTheme.Text, DebuggerTheme.Muted, .3f), t.X + S(10), t.Y + S(27));
+				var valueFont = reg.Changed ? DebuggerTheme.MonoBold : DebuggerTheme.Mono;
+				DebuggerTheme.DrawText(g, value, valueFont, reg.Changed ? DebuggerTheme.Text : DebuggerTheme.Mix(DebuggerTheme.Text, DebuggerTheme.Muted, .3f), t.X + S(10), t.Y + S(27));
+				// Small plain numbers also read in decimal, where it fits.
+				if (!reg.LooksLikeAddress && reg.Value < 100000000000UL && !reg.IsInstructionPointer && reg.Name != "rflags")
+				{
+					var decimalText = "= " + reg.Value.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
+					int left = t.X + S(10) + DebuggerTheme.Measure(value, valueFont).Width + S(8), right = t.Right - S(8);
+					int needed = DebuggerTheme.Measure(decimalText, DebuggerTheme.UiSmall).Width;
+					if (left + needed <= right) DebuggerTheme.DrawText(g, decimalText, DebuggerTheme.UiSmall, DebuggerTheme.Muted, right - needed, t.Y + S(29));
+				}
 			}
 		}
 
@@ -335,6 +366,8 @@ namespace ReClassNET.Controls.Debugger
 		public sealed class HookModel
 		{
 			public ulong Site, Allocation, ReturnAddress;
+			/// <summary>End of the user's selection. Displaced instructions past it were only moved to make room for the jump.</summary>
+			public ulong SelectionEnd;
 			public byte[] EntryBytes = new byte[0];
 			public string Semantics = "";
 			public List<ListedInstruction> YourCode = new List<ListedInstruction>();
@@ -378,7 +411,7 @@ namespace ReClassNET.Controls.Debugger
 		{
 			if (hook != null)
 			{
-				int lines = Math.Max(hook.YourCode.Count + hook.Displaced.Count + 2, 4);
+				int lines = Math.Max(hook.YourCode.Count + hook.Displaced.Count + 3, 4);
 				return S(44) + lines * S(20) + S(64);
 			}
 			int perRow = Math.Max(4, (width - S(150)) / CellWidth);
@@ -461,7 +494,7 @@ namespace ReClassNET.Controls.Debugger
 		{
 			int top = S(40), arrow = S(40);
 			int boxWidth = (width - S(24) - arrow * 2) / 3;
-			int lines = Math.Max(hook.YourCode.Count + hook.Displaced.Count + 2, 4);
+			int lines = Math.Max(hook.YourCode.Count + hook.Displaced.Count + 3, 4);
 			int boxHeight = S(40) + lines * S(20);
 			var site = new Rectangle(S(12), top, boxWidth, boxHeight);
 			var code = new Rectangle(site.Right + arrow, top, boxWidth, boxHeight);
@@ -477,13 +510,30 @@ namespace ReClassNET.Controls.Debugger
 
 			Box(g, code, "HOOK CODE · " + hook.Semantics.ToUpperInvariant(), "0x" + hook.Allocation.ToString("X"), DebuggerTheme.Violet);
 			y = code.Y + S(48);
-			var sections = hook.Semantics.IndexOf("after", StringComparison.OrdinalIgnoreCase) >= 0
-				? new[] { new KeyValuePair<string, List<ListedInstruction>>("original (moved here)", hook.Displaced), new KeyValuePair<string, List<ListedInstruction>>("your code", hook.YourCode) }
-				: hook.Semantics.IndexOf("before", StringComparison.OrdinalIgnoreCase) >= 0
-					? new[] { new KeyValuePair<string, List<ListedInstruction>>("your code", hook.YourCode), new KeyValuePair<string, List<ListedInstruction>>("original (moved here)", hook.Displaced) }
-					: new[] { new KeyValuePair<string, List<ListedInstruction>>("your code (replaces the original)", hook.YourCode) };
+			// The same order the planner writes the hook in: what runs first is listed first.
+			var selected = hook.Displaced.Where(i => hook.SelectionEnd == 0 || i.Address < hook.SelectionEnd).ToList();
+			var moved = hook.Displaced.Where(i => hook.SelectionEnd != 0 && i.Address >= hook.SelectionEnd).ToList();
+			const string MovedLabel = "moved here to make room for the jump";
+			var sections = new List<KeyValuePair<string, List<ListedInstruction>>>();
+			if (hook.Semantics.IndexOf("after", StringComparison.OrdinalIgnoreCase) >= 0)
+			{
+				sections.Add(new KeyValuePair<string, List<ListedInstruction>>("original selection (moved here)", selected));
+				sections.Add(new KeyValuePair<string, List<ListedInstruction>>("your code", hook.YourCode));
+				sections.Add(new KeyValuePair<string, List<ListedInstruction>>(MovedLabel, moved));
+			}
+			else if (hook.Semantics.IndexOf("before", StringComparison.OrdinalIgnoreCase) >= 0)
+			{
+				sections.Add(new KeyValuePair<string, List<ListedInstruction>>("your code", hook.YourCode));
+				sections.Add(new KeyValuePair<string, List<ListedInstruction>>("original (moved here)", hook.Displaced));
+			}
+			else
+			{
+				sections.Add(new KeyValuePair<string, List<ListedInstruction>>("your code (replaces the selection)", hook.YourCode));
+				sections.Add(new KeyValuePair<string, List<ListedInstruction>>(MovedLabel, moved));
+			}
 			foreach (var section in sections)
 			{
+				if (section.Value.Count == 0 && !section.Key.StartsWith("your", StringComparison.Ordinal)) continue;
 				bool yours = section.Key.StartsWith("your", StringComparison.Ordinal);
 				DebuggerTheme.DrawText(g, section.Key, DebuggerTheme.UiSmallBold, yours ? DebuggerTheme.Teal : DebuggerTheme.Muted, code.X + S(10), y); y += S(18);
 				foreach (var line in section.Value)
@@ -500,7 +550,7 @@ namespace ReClassNET.Controls.Debugger
 
 			Arrow(g, site.Right + S(4), site.Y + S(24), code.X - S(4), DebuggerTheme.Violet);
 			Arrow(g, code.Right + S(4), code.Y + S(24), back.X - S(4), DebuggerTheme.Teal);
-			DebuggerTheme.DrawText(g, "Hook memory stays reserved until the game exits, even after Restore original.", DebuggerTheme.UiSmall, DebuggerTheme.Faint, S(12), top + boxHeight + S(10));
+			DebuggerTheme.DrawText(g, "Hook memory stays reserved until the game exits, even after Restore original.", DebuggerTheme.UiSmall, DebuggerTheme.Muted, S(12), top + boxHeight + S(10));
 		}
 
 		private void Box(Graphics g, Rectangle bounds, string title, string address, Color accent)

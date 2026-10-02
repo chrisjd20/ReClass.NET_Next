@@ -4,6 +4,7 @@ using System.Linq;
 using System.Collections.Generic;
 using System.Threading;
 using ReClassNET.AssemblyEditing;
+using ReClassNET.Extensions;
 using ReClassNET.Memory;
 using ReClassNET.Patching;
 using ReClassNET.Project;
@@ -22,6 +23,17 @@ namespace ReClassNET.Debugger
         public PatchManager Manager {get;}
         public ReClassNetProject Project {get;private set;}
         public PatchRepository Repository {get;private set;}
+        /// <summary>The game this workspace debugged has exited, or the session was shut down (for example ReClass attached to a new process).</summary>
+        public bool SessionEnded=>Session.IsDisposed||Session.State==DebugSessionState.Exited;
+        /// <summary>True when the value is an address of memory the game has mapped: what a pointer must be before it can be followed.</summary>
+        public bool LooksLikeAddress(ulong value)
+        {
+            var pointer=new IntPtr(unchecked((long)value));
+            if(!pointer.MayBeValid())return false;
+            if(Process.GetSectionToPointer(pointer)!=null)return true;
+            // The section list is refreshed periodically, so fresh heap memory may not be in it yet.
+            return !SessionEnded&&Process.ReadExactForDebugger(value,new byte[1]);
+        }
         public DebugWorkspace(RemoteProcess process,ReClassNetProject project)
         {
             Process=process;Session=new DebugSession(process);Target=new SessionPatchTarget(process,Session);
@@ -112,6 +124,17 @@ namespace ReClassNET.Debugger
             return all.FirstOrDefault(m=>string.Equals(m.Name,name,StringComparison.OrdinalIgnoreCase))
                 ??all.FirstOrDefault(m=>string.Equals(System.IO.Path.GetFileNameWithoutExtension(m.Name??""),name,StringComparison.OrdinalIgnoreCase));
         }
-        public void Dispose(){Repository.Save();Session.Dispose();Repository.Changed-=RepositoryChanged;}
+        /// <summary>Raised once the session has been shut down, so windows still open on it can say so.</summary>
+        public event EventHandler Ended;
+        public void Dispose()
+        {
+            try{Repository.Save();Session.Dispose();Repository.Changed-=RepositoryChanged;}
+            finally
+            {
+                var subscribers=Ended;
+                if(subscribers!=null)foreach(EventHandler handler in subscribers.GetInvocationList())
+                    try{handler(this,EventArgs.Empty);}catch(Exception error){System.Diagnostics.Debug.WriteLine(error.Message);}
+            }
+        }
     }
 }
