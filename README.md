@@ -105,6 +105,13 @@ restoration rules, and direct room launch options.
    game window.
 4. Follow the **Steps** panel, beginning with Room 0 if this is your first time.
 
+> **Pro tip:** open this repository in your favorite AI-enabled CLI or IDE while
+> you play. If you get stuck, ask it what to do next or have it explain the
+> current ReClass step in plain language. Include the Breakout room number, the
+> step text, and any status or error shown by ReClass; the assistant can use this
+> README, the [full game guide](docs/DEMO.md), and the source alongside your
+> question to give more specific help.
+
 The game requires OpenGL 3.3. Linux additionally needs the X11/XWayland graphics
 libraries documented in the package. Docker and build tools are not needed to
 play a packaged release.
