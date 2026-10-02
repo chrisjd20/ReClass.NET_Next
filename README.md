@@ -11,10 +11,23 @@ and **ReClass: Breakout**—an included game designed to teach the complete tool
 > operating systems or CPU architectures may require additional work; no support
 > claim is made for non-x64 platforms.
 
+## The tool and the tutorial
+
+### ReClass.NET
+
+[![ReClass.NET main window and memory scanner](images/re-image.png)](images/re-image.png)
+
+*ReClass.NET is the inspection and editing tool. Attach it to a target process,
+scan memory, build classes, follow pointers, inspect instructions, and manage
+patches from this application.*
+
+### ReClass: Breakout
+
 [![ReClass: Breakout — the Armored Sentinels pointer lesson](images/image.png)](images/image.png)
 
-*ReClass: Breakout running the Armored Sentinels lesson. The game tracks the
-result of edits made in ReClass and guides the player through each technique.*
+*Breakout is the separate demo game and target process. The Armored Sentinels
+lesson shown here tracks the result of edits made in ReClass and guides the
+player through each technique.*
 
 ## What's in this revamp
 
